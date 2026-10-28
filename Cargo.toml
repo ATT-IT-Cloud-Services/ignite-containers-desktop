@@ -1,0 +1,50 @@
+[package]
+name = "ignite-containers-desktop"
+version = "0.1.0"
+edition = "2021"
+license = "AGPL-3.0-or-later"
+description = "Desktop management and debug console for Ignite Containers"
+repository = "https://github.com/ATT-IT-Cloud-Services/ignite-containers-desktop"
+authors = ["Ignite Containers Contributors"]
+readme = "README.md"
+
+[[bin]]
+name = "ignite-containers-desktop"
+path = "src/main.rs"
+
+[dependencies]
+eframe = { version = "0.31", default-features = false, features = ["default_fonts", "glow", "wayland", "x11"] }
+egui = "0.31"
+egui_extras = { version = "0.31", features = ["all_loaders"] }
+ignite-containers-client.workspace = true
+ignite-containers-core.workspace = true
+ignite-containers-proto.workspace = true
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "time", "sync"] }
+reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+chrono = { version = "0.4", features = ["serde"] }
+
+[package.metadata.packager]
+before-packaging-command = "cargo build --release --locked -p ignite-containers-desktop"
+product-name = "Ignite Containers Desktop"
+identifier = "de.att-it.ignite-containers.desktop"
+publisher = "ATT-IT Cloud Services"
+category = "Utility"
+description = "Desktop management console for Ignite Containers"
+long-description = "Native management and debug console for Ignite Containers control planes."
+license-file = "LICENSE"
+copyright = "Copyright ATT-IT Cloud Services"
+out-dir = "dist"
+binaries = [{ path = "ignite-containers-desktop", main = true }]
+icons = ["assets/icon-32.png", "assets/icon-64.png", "assets/icon-128.png", "assets/icon-256.png", "assets/icon.png", "assets/icon.ico"]
+
+[package.metadata.generate-rpm]
+name = "ignite-containers-desktop"
+summary = "Desktop management console for Ignite Containers"
+license = "AGPL-3.0-or-later"
+assets = [
+    { source = "target/release/ignite-containers-desktop", dest = "/usr/bin/ignite-containers-desktop", mode = "755" },
+    { source = "desktop/assets/icon-256.png", dest = "/usr/share/icons/hicolor/256x256/apps/ignite-containers-desktop.png", mode = "644" },
+    { source = "desktop/assets/ignite-containers-desktop.desktop", dest = "/usr/share/applications/ignite-containers-desktop.desktop", mode = "644" },
+]

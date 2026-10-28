@@ -1,0 +1,9 @@
+[Desktop Entry]
+Type=Application
+Name=Ignite Containers Desktop
+Comment=Manage Ignite Containers nodes, servers and consoles
+Exec=ignite-containers-desktop
+Icon=ignite-containers-desktop
+Terminal=false
+Categories=Utility;Development;
+StartupNotify=true
