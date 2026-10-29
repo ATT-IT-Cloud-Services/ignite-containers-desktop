@@ -2,7 +2,7 @@
 name = "ignite-containers-desktop"
 version = "1.0.0"
 edition = "2021"
-license = "AGPL-3.0-or-later"
+license = "LicenseRef-ATT-IT-AS-IS"
 description = "Desktop management and debug console for Ignite Containers"
 repository = "https://github.com/ATT-IT-Cloud-Services/ignite-containers-desktop"
 authors = ["Ignite Containers Contributors"]
@@ -42,7 +42,7 @@ icons = ["assets/icon-32.png", "assets/icon-64.png", "assets/icon-128.png", "ass
 [package.metadata.generate-rpm]
 name = "ignite-containers-desktop"
 summary = "Desktop management console for Ignite Containers"
-license = "AGPL-3.0-or-later"
+license = "LicenseRef-ATT-IT-AS-IS"
 assets = [
     { source = "target/release/ignite-containers-desktop", dest = "/usr/bin/ignite-containers-desktop", mode = "755" },
     { source = "desktop/assets/icon-256.png", dest = "/usr/share/icons/hicolor/256x256/apps/ignite-containers-desktop.png", mode = "644" },
