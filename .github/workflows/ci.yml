@@ -1,0 +1,30 @@
+name: CI
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Checkout private source monorepo
+        uses: actions/checkout@v4
+        with:
+          repository: ATT-IT-Cloud-Services/ignite-containers-monorepo
+          token: ${{ secrets.MONOREPO_TOKEN }}
+          path: monorepo
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: monorepo
+      - name: Desktop system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            libxkbcommon-dev libwayland-dev libx11-dev libxi-dev \
+            libgl1-mesa-dev libgtk-3-dev
+      - run: cargo test --locked --manifest-path monorepo/Cargo.toml -p ignite-containers-desktop
