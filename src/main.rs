@@ -9,12 +9,11 @@ use config::SavedConfig;
 use eframe::egui::{
     self, Align, Color32, FontId, Layout, RichText, ScrollArea, TextEdit, TextStyle, Vec2,
 };
-use ignite_containers_core::models::{
-    Allocation, AuditEvent, Backup, BackupState, DatabaseHost, Node, NodeStatus, Server,
-    ServerDatabase, ServerDetail, ServerState,
+use ignite_containers_client::{
+    Allocation, AuditAction, AuditEvent, Backup, BackupState, DatabaseHost, FileContent, FileEntry,
+    FileList, Node, NodeStatus, Server, ServerDatabase, ServerDetail, ServerState, ServerStats,
+    Template, TemplateRecord,
 };
-use ignite_containers_core::template::{Template, TemplateRecord};
-use ignite_containers_proto::{FileContent, FileEntry, ServerStats};
 use serde::Deserialize;
 use serde_json::{json, Map, Value};
 use std::collections::{HashMap, HashSet};
@@ -1753,32 +1752,30 @@ impl App {
                     return;
                 }
                 match outcome {
-                    Ok(response) if response.is_success() => {
-                        match response.json::<ignite_containers_proto::FileList>() {
-                            Ok(list) => {
-                                self.files.path = path;
-                                self.files.entries = list.entries;
-                                self.files.entries.sort_by(|left, right| {
-                                    right
-                                        .is_directory
-                                        .cmp(&left.is_directory)
-                                        .then_with(|| left.name.cmp(&right.name))
-                                });
-                                self.files.list_error = None;
-                                if let Some(selected) = &self.files.selected {
-                                    if !self
-                                        .files
-                                        .entries
-                                        .iter()
-                                        .any(|entry| &entry.path == selected)
-                                    {
-                                        self.files.selected = None;
-                                    }
+                    Ok(response) if response.is_success() => match response.json::<FileList>() {
+                        Ok(list) => {
+                            self.files.path = path;
+                            self.files.entries = list.entries;
+                            self.files.entries.sort_by(|left, right| {
+                                right
+                                    .is_directory
+                                    .cmp(&left.is_directory)
+                                    .then_with(|| left.name.cmp(&right.name))
+                            });
+                            self.files.list_error = None;
+                            if let Some(selected) = &self.files.selected {
+                                if !self
+                                    .files
+                                    .entries
+                                    .iter()
+                                    .any(|entry| &entry.path == selected)
+                                {
+                                    self.files.selected = None;
                                 }
                             }
-                            Err(error) => self.files.list_error = Some(error),
                         }
-                    }
+                        Err(error) => self.files.list_error = Some(error),
+                    },
                     Ok(response) => self.files.list_error = Some(response.error_message()),
                     Err(error) => self.files.list_error = Some(error),
                 }
@@ -8503,7 +8500,7 @@ fn backup_color(state: BackupState) -> Color32 {
     }
 }
 
-fn audit_action_label(action: ignite_containers_core::models::AuditAction) -> String {
+fn audit_action_label(action: AuditAction) -> String {
     serde_json::to_value(action)
         .ok()
         .and_then(|value| value.as_str().map(str::to_string))
