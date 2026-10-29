@@ -24,4 +24,4 @@ build it from the private `ignite-containers-monorepo`; release workflows run
 there and publish the resulting installers here. The source in this repository
 is a public mirror of the `desktop/` directory.
 
-License: AGPL-3.0-or-later. See `LICENSE`.
+License: ATT IT AS-IS Software License Agreement. See `LICENSE`.
