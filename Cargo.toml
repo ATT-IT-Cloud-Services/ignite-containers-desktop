@@ -31,7 +31,7 @@ publisher = "ATT-IT Cloud Services"
 category = "Utility"
 description = "Desktop management console for Ignite Containers"
 long-description = "Native management and debug console for Ignite Containers control planes."
-license-file = "LICENSE"
+license-file = "LICENSE.md"
 copyright = "Copyright ATT-IT Cloud Services"
 out-dir = "dist"
 binaries = [{ path = "ignite-containers-desktop", main = true }]
