@@ -51,47 +51,47 @@ impl fmt::Debug for Connection {
 pub enum Tag {
     Connect,
     Me,
-    Servers,
-    ServerDetail(String),
-    ServerStats(String),
+    Pods,
+    PodDetail(String),
+    PodStats(String),
     Nodes,
     Allocations(String),
     Templates,
     TemplateDetail(String),
     FilesList {
-        server: String,
+        pod: String,
         path: String,
     },
     FileRead {
-        server: String,
+        pod: String,
         path: String,
     },
     DbHosts,
-    ServerDbs(String),
+    PodDbs(String),
     Backups(String),
     Audit,
     Proxy,
     Raw,
-    ServerCreate,
-    ServerUpdate {
-        server: String,
+    PodCreate,
+    PodUpdate {
+        pod: String,
     },
-    ServerPower {
-        server: String,
+    PodPower {
+        pod: String,
         action: &'static str,
     },
     ConsoleCommand {
-        server: String,
+        pod: String,
     },
-    ServerReinstall {
-        server: String,
+    PodReinstall {
+        pod: String,
     },
-    ServerSuspend {
-        server: String,
+    PodSuspend {
+        pod: String,
         resume: bool,
     },
-    ServerDelete {
-        server: String,
+    PodDelete {
+        pod: String,
     },
     NodeCreate,
     AllocationCreate {
@@ -106,25 +106,25 @@ pub enum Tag {
         id: String,
     },
     FileSave {
-        server: String,
+        pod: String,
     },
     FileMkdir {
-        server: String,
+        pod: String,
     },
     FileRename {
-        server: String,
+        pod: String,
     },
     FileChmod {
-        server: String,
+        pod: String,
     },
     FileDelete {
-        server: String,
+        pod: String,
     },
     FileCompress {
-        server: String,
+        pod: String,
     },
     FileDecompress {
-        server: String,
+        pod: String,
     },
     DbHostCreate,
     DbHostDelete {
@@ -134,25 +134,25 @@ pub enum Tag {
         id: String,
     },
     DbCreate {
-        server: String,
+        pod: String,
     },
     DbDelete {
-        server: String,
+        pod: String,
         id: String,
     },
     BackupCreate {
-        server: String,
+        pod: String,
     },
     BackupDelete {
-        server: String,
+        pod: String,
         id: String,
     },
     BackupRestore {
-        server: String,
+        pod: String,
         id: String,
     },
     BackupDownload {
-        server: String,
+        pod: String,
         id: String,
     },
     ProxyCreate,
@@ -202,11 +202,11 @@ pub enum Tag {
     BulkPower,
     BulkCommand,
     AllocationAttach {
-        server: String,
+        pod: String,
         allocation: String,
     },
     AllocationDetach {
-        server: String,
+        pod: String,
         allocation: String,
     },
 }
@@ -413,7 +413,7 @@ pub enum ConsoleMode {
 
 pub enum ConsoleCommand {
     Watch {
-        server_id: String,
+        pod_id: String,
         conn: Connection,
         mode: ConsoleMode,
     },
@@ -422,13 +422,13 @@ pub enum ConsoleCommand {
 
 pub enum ConsoleEvent {
     Lines {
-        server_id: String,
+        pod_id: String,
         lines: Vec<String>,
         cursor: String,
         truncated: bool,
     },
     Error {
-        server_id: String,
+        pod_id: String,
         message: String,
     },
 }
@@ -478,19 +478,19 @@ impl ConsoleWorker {
                             continue;
                         }
 
-                        let (server_id, conn, mode) = target.clone().expect("target checked");
+                        let (pod_id, conn, mode) = target.clone().expect("target checked");
                         match mode {
                             ConsoleMode::Poll => {
                                 let outcome =
-                                    fetch_logs(&poll_client, &conn, &server_id).await;
+                                    fetch_logs(&poll_client, &conn, &pod_id).await;
                                 let event = match outcome {
                                     Ok((lines, cursor, truncated)) => ConsoleEvent::Lines {
-                                        server_id,
+                                        pod_id,
                                         lines,
                                         cursor,
                                         truncated,
                                     },
-                                    Err(message) => ConsoleEvent::Error { server_id, message },
+                                    Err(message) => ConsoleEvent::Error { pod_id, message },
                                 };
                                 let _ = out_tx.send(event);
                                 ctx.request_repaint();
@@ -506,7 +506,7 @@ impl ConsoleWorker {
                             }
                             ConsoleMode::Stream => {
                                 let mut interrupted = false;
-                                match open_log_stream(&stream_client, &conn, &server_id).await {
+                                match open_log_stream(&stream_client, &conn, &pod_id).await {
                                     Ok(mut response) => {
                                         let mut buffer = String::new();
                                         loop {
@@ -525,12 +525,12 @@ impl ConsoleWorker {
                                                             for (kind, data) in parse_sse_chunk(&mut buffer, &bytes) {
                                                                 let event = if kind == "error" {
                                                                     ConsoleEvent::Error {
-                                                                        server_id: server_id.clone(),
+                                                                        pod_id: pod_id.clone(),
                                                                         message: data,
                                                                     }
                                                                 } else {
                                                                     ConsoleEvent::Lines {
-                                                                        server_id: server_id.clone(),
+                                                                        pod_id: pod_id.clone(),
                                                                         lines: data.lines().map(str::to_string).collect(),
                                                                         cursor: String::new(),
                                                                         truncated: false,
@@ -542,14 +542,14 @@ impl ConsoleWorker {
                                                         }
                                                         Ok(None) => {
                                                             let _ = out_tx.send(ConsoleEvent::Error {
-                                                                server_id: server_id.clone(),
-                                                                message: "log stream closed by the server".to_string(),
+                                                                pod_id: pod_id.clone(),
+                                                                message: "log stream closed by the pod".to_string(),
                                                             });
                                                             break;
                                                         }
                                                         Err(error) => {
                                                             let _ = out_tx.send(ConsoleEvent::Error {
-                                                                server_id: server_id.clone(),
+                                                                pod_id: pod_id.clone(),
                                                                 message: format!("log stream error: {error}"),
                                                             });
                                                             break;
@@ -561,7 +561,7 @@ impl ConsoleWorker {
                                     }
                                     Err(message) => {
                                         let _ = out_tx.send(ConsoleEvent::Error {
-                                            server_id: server_id.clone(),
+                                            pod_id: pod_id.clone(),
                                             message,
                                         });
                                     }
@@ -587,9 +587,9 @@ impl ConsoleWorker {
         Self { tx, rx: out_rx }
     }
 
-    pub fn watch(&self, server_id: &str, conn: &Connection, mode: ConsoleMode) {
+    pub fn watch(&self, pod_id: &str, conn: &Connection, mode: ConsoleMode) {
         let _ = self.tx.send(ConsoleCommand::Watch {
-            server_id: server_id.to_string(),
+            pod_id: pod_id.to_string(),
             conn: conn.clone(),
             mode,
         });
@@ -607,11 +607,7 @@ impl ConsoleWorker {
 
 fn apply_command(command: ConsoleCommand, target: &mut Option<(String, Connection, ConsoleMode)>) {
     match command {
-        ConsoleCommand::Watch {
-            server_id,
-            conn,
-            mode,
-        } => *target = Some((server_id, conn, mode)),
+        ConsoleCommand::Watch { pod_id, conn, mode } => *target = Some((pod_id, conn, mode)),
         ConsoleCommand::Pause => *target = None,
     }
 }
@@ -636,10 +632,10 @@ async fn wait_for_command(
 async fn open_log_stream(
     client: &reqwest::Client,
     conn: &Connection,
-    server_id: &str,
+    pod_id: &str,
 ) -> Result<reqwest::Response, String> {
     let response = client
-        .get(conn.endpoint(&format!("/api/v1/servers/{server_id}/logs/stream")))
+        .get(conn.endpoint(&format!("/api/v1/pods/{pod_id}/logs/stream")))
         .bearer_auth(&conn.api_key)
         .header(reqwest::header::ACCEPT, "text/event-stream")
         .send()
@@ -679,10 +675,10 @@ fn parse_sse_chunk(buffer: &mut String, bytes: &[u8]) -> Vec<(String, String)> {
 async fn fetch_logs(
     client: &reqwest::Client,
     conn: &Connection,
-    server_id: &str,
+    pod_id: &str,
 ) -> Result<(Vec<String>, String, bool), String> {
     let response = client
-        .get(conn.endpoint(&format!("/api/v1/servers/{server_id}/logs?lines=500")))
+        .get(conn.endpoint(&format!("/api/v1/pods/{pod_id}/logs?lines=500")))
         .bearer_auth(&conn.api_key)
         .header(reqwest::header::ACCEPT, "application/json")
         .send()
@@ -834,7 +830,7 @@ mod tests {
         use std::io::{Read, Write};
         use std::net::TcpListener;
 
-        let listener = TcpListener::bind("127.0.0.1:0").expect("bind test SSE server");
+        let listener = TcpListener::bind("127.0.0.1:0").expect("bind test SSE pod");
         let address = listener.local_addr().expect("test SSE address");
         std::thread::spawn(move || {
             let (mut stream, _) = listener.accept().expect("accept SSE client");
@@ -853,7 +849,7 @@ mod tests {
 
         let worker = ConsoleWorker::new(egui::Context::default());
         worker.watch(
-            "server-id",
+            "pod-id",
             &Connection::new(format!("http://{address}"), "test-key"),
             ConsoleMode::Stream,
         );

@@ -17,7 +17,7 @@ pub struct SavedConfig {
     #[serde(default)]
     pub last_tab: Option<String>,
     #[serde(default)]
-    pub last_server: Option<String>,
+    pub last_pod: Option<String>,
 }
 
 #[must_use]

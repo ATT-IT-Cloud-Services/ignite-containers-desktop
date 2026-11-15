@@ -11,8 +11,8 @@ use eframe::egui::{
 };
 use ignite_containers_client::{
     Allocation, AuditAction, AuditEvent, Backup, BackupState, DatabaseHost, FileContent, FileEntry,
-    FileList, Node, NodeStatus, Server, ServerDatabase, ServerDetail, ServerState, ServerStats,
-    Template, TemplateRecord,
+    FileList, Node, NodeStatus, Pod, PodDatabase, PodDetail, PodState, PodStats, Template,
+    TemplateRecord,
 };
 use serde::Deserialize;
 use serde_json::{json, Map, Value};
@@ -27,7 +27,7 @@ const DEFAULT_URL: &str = "http://127.0.0.1:8080";
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 enum Tab {
     Overview,
-    Servers,
+    Pods,
     Console,
     Files,
     Config,
@@ -50,7 +50,7 @@ enum Tab {
 impl Tab {
     const ALL: [Tab; 19] = [
         Tab::Overview,
-        Tab::Servers,
+        Tab::Pods,
         Tab::Console,
         Tab::Files,
         Tab::Config,
@@ -73,7 +73,7 @@ impl Tab {
     fn label(self) -> &'static str {
         match self {
             Tab::Overview => "Overview",
-            Tab::Servers => "Servers",
+            Tab::Pods => "Pods",
             Tab::Console => "Console",
             Tab::Files => "Files",
             Tab::Config => "Config",
@@ -97,7 +97,7 @@ impl Tab {
     fn as_str(self) -> &'static str {
         match self {
             Tab::Overview => "overview",
-            Tab::Servers => "servers",
+            Tab::Pods => "pods",
             Tab::Console => "console",
             Tab::Files => "files",
             Tab::Config => "config",
@@ -121,7 +121,7 @@ impl Tab {
     fn group(self) -> &'static str {
         match self {
             Tab::Overview
-            | Tab::Servers
+            | Tab::Pods
             | Tab::Console
             | Tab::Files
             | Tab::Config
@@ -202,7 +202,7 @@ impl FilesState {
 }
 
 #[derive(Default)]
-struct CreateServerForm {
+struct CreatePodForm {
     show: bool,
     node_id: Option<String>,
     template_id: Option<String>,
@@ -222,7 +222,7 @@ struct CreateServerForm {
     error: Option<String>,
 }
 
-impl CreateServerForm {
+impl CreatePodForm {
     fn new() -> Self {
         Self {
             memory: "1024".to_string(),
@@ -237,7 +237,7 @@ impl CreateServerForm {
 
 #[derive(Default)]
 struct EditLimitsForm {
-    server: Option<String>,
+    pod: Option<String>,
     memory: String,
     disk: String,
     cpu: String,
@@ -249,23 +249,23 @@ struct EditLimitsForm {
 }
 
 impl EditLimitsForm {
-    fn load(&mut self, server: &Server) {
-        let id = server.id.to_string();
-        self.server = Some(id);
-        self.memory = server.limits.memory_mb.to_string();
-        self.disk = server.limits.disk_mb.to_string();
-        self.cpu = server.limits.cpu_millis.to_string();
-        self.swap = server.limits.swap_mb.to_string();
-        self.io_weight = server.limits.io_weight.to_string();
-        self.pids_limit = server.limits.pids_limit.to_string();
-        self.cpuset = server.limits.cpuset.clone().unwrap_or_default();
+    fn load(&mut self, pod: &Pod) {
+        let id = pod.id.to_string();
+        self.pod = Some(id);
+        self.memory = pod.limits.memory_mb.to_string();
+        self.disk = pod.limits.disk_mb.to_string();
+        self.cpu = pod.limits.cpu_millis.to_string();
+        self.swap = pod.limits.swap_mb.to_string();
+        self.io_weight = pod.limits.io_weight.to_string();
+        self.pids_limit = pod.limits.pids_limit.to_string();
+        self.cpuset = pod.limits.cpuset.clone().unwrap_or_default();
         self.error = None;
     }
 }
 
 #[derive(Default)]
-struct ServerConfigForm {
-    server: Option<String>,
+struct PodConfigForm {
+    pod: Option<String>,
     name: String,
     description: String,
     external_ref: String,
@@ -276,15 +276,15 @@ struct ServerConfigForm {
     error: Option<String>,
 }
 
-impl ServerConfigForm {
-    fn load(&mut self, server: &Server) {
-        self.server = Some(server.id.to_string());
-        self.name = server.name.clone();
-        self.description = server.description.clone();
-        self.external_ref = server.external_ref.clone().unwrap_or_default();
-        self.image = server.image.clone();
-        self.template_version = server.template_version.clone();
-        self.labels = serde_json::to_string_pretty(&server.labels).unwrap_or_else(|_| "{}".into());
+impl PodConfigForm {
+    fn load(&mut self, pod: &Pod) {
+        self.pod = Some(pod.id.to_string());
+        self.name = pod.name.clone();
+        self.description = pod.description.clone();
+        self.external_ref = pod.external_ref.clone().unwrap_or_default();
+        self.image = pod.image.clone();
+        self.template_version = pod.template_version.clone();
+        self.labels = serde_json::to_string_pretty(&pod.labels).unwrap_or_else(|_| "{}".into());
         self.variables.clear();
         self.error = None;
     }
@@ -292,7 +292,7 @@ impl ServerConfigForm {
 
 #[derive(Default)]
 struct ScheduleForm {
-    server: Option<String>,
+    pod: Option<String>,
     id: Option<String>,
     name: String,
     cron: String,
@@ -316,7 +316,7 @@ impl ScheduleForm {
 struct ApiKeyForm {
     name: String,
     scopes: String,
-    server_ids: String,
+    pod_ids: String,
     days: String,
     error: Option<String>,
 }
@@ -324,7 +324,7 @@ struct ApiKeyForm {
 impl ApiKeyForm {
     fn new() -> Self {
         Self {
-            scopes: "server:read".to_string(),
+            scopes: "pod:read".to_string(),
             ..Self::default()
         }
     }
@@ -491,7 +491,7 @@ impl CreateDbHostForm {
 }
 
 #[derive(Default)]
-struct CreateServerDbForm {
+struct CreatePodDbForm {
     host_id: Option<String>,
     remote: String,
     error: Option<String>,
@@ -519,12 +519,12 @@ struct RawView {
 
 #[derive(Clone)]
 enum ConfirmAction {
-    DeleteServer {
+    DeletePod {
         id: String,
         name: String,
     },
     DeleteFile {
-        server: String,
+        pod: String,
         path: String,
     },
     DeleteAllocation {
@@ -541,17 +541,17 @@ enum ConfirmAction {
         name: String,
     },
     DeleteDb {
-        server: String,
+        pod: String,
         id: String,
         name: String,
     },
     DeleteBackup {
-        server: String,
+        pod: String,
         id: String,
         name: String,
     },
     RestoreBackup {
-        server: String,
+        pod: String,
         id: String,
         name: String,
     },
@@ -568,12 +568,12 @@ enum ConfirmAction {
         name: String,
     },
     RevokeSftp {
-        server: String,
+        pod: String,
         id: String,
         username: String,
     },
     DeleteSchedule {
-        server: String,
+        pod: String,
         id: String,
         name: String,
     },
@@ -582,12 +582,12 @@ enum ConfirmAction {
 impl ConfirmAction {
     fn title(&self) -> &'static str {
         match self {
-            ConfirmAction::DeleteServer { .. } => "Delete server?",
+            ConfirmAction::DeletePod { .. } => "Delete pod?",
             ConfirmAction::DeleteFile { .. } => "Delete file?",
             ConfirmAction::DeleteAllocation { .. } => "Delete allocation?",
             ConfirmAction::DeleteTemplate { .. } => "Delete template?",
             ConfirmAction::DeleteDbHost { .. } => "Delete database host?",
-            ConfirmAction::DeleteDb { .. } => "Delete server database?",
+            ConfirmAction::DeleteDb { .. } => "Delete pod database?",
             ConfirmAction::DeleteBackup { .. } => "Delete backup?",
             ConfirmAction::RestoreBackup { .. } => "Restore backup?",
             ConfirmAction::DeleteProxy { .. } => "Delete proxy route?",
@@ -600,17 +600,19 @@ impl ConfirmAction {
 
     fn detail(&self) -> String {
         match self {
-            ConfirmAction::DeleteServer { id, name } => {
+            ConfirmAction::DeletePod { id, name } => {
                 format!(
-                    "Delete server '{name}' ({})? This cannot be undone.",
+                    "Delete pod '{name}' ({})? This cannot be undone.",
                     short_id(id)
                 )
             }
             ConfirmAction::DeleteFile { path, .. } => {
-                format!("Delete '{path}' from the server filesystem? This cannot be undone.")
+                format!("Delete '{path}' from the pod filesystem? This cannot be undone.")
             }
             ConfirmAction::DeleteAllocation { port, .. } => {
-                format!("Delete allocation for port {port}? The port becomes available to other servers.")
+                format!(
+                    "Delete allocation for port {port}? The port becomes available to other pods."
+                )
             }
             ConfirmAction::DeleteTemplate { id, name } => {
                 format!("Delete template '{name}' ({})?", short_id(id))
@@ -625,14 +627,14 @@ impl ConfirmAction {
                 format!("Delete backup '{name}'? This cannot be undone.")
             }
             ConfirmAction::RestoreBackup { name, .. } => {
-                format!("Restore backup '{name}'? Current server files will be replaced.")
+                format!("Restore backup '{name}'? Current pod files will be replaced.")
             }
             ConfirmAction::DeleteProxy { domain, .. } => {
                 format!("Delete proxy route for '{domain}'?")
             }
             ConfirmAction::DeleteNode { id, name } => {
                 format!(
-                    "Delete node '{name}' ({})? It must have no servers.",
+                    "Delete node '{name}' ({})? It must have no pods.",
                     short_id(id)
                 )
             }
@@ -659,48 +661,29 @@ enum Action {
     RefreshTab,
     RefreshAll,
     DismissToast,
-    SelectServer(String),
-    RefreshServers,
+    SelectPod(String),
+    RefreshPods,
     RefreshDetail,
     LoadStats,
-    Power {
-        server: String,
-        signal: &'static str,
-    },
+    Power { pod: String, signal: &'static str },
     Reinstall(String),
     SaveLimits,
-    Suspend {
-        server: String,
-        resume: bool,
-    },
-    AskDeleteServer {
-        id: String,
-        name: String,
-    },
-    ToggleCreateServer,
-    CreateServer,
+    Suspend { pod: String, resume: bool },
+    AskDeletePod { id: String, name: String },
+    ToggleCreatePod,
+    CreatePod,
     SelectNode(String),
     CreateNode,
     ToggleCreateNode,
     CreateAllocation,
-    AskDeleteAllocation {
-        node: String,
-        id: String,
-        port: u16,
-    },
+    AskDeleteAllocation { node: String, id: String, port: u16 },
     SelectTemplate(String),
     ImportEgg,
     PreviewEgg,
-    AskDeleteTemplate {
-        id: String,
-        name: String,
-    },
+    AskDeleteTemplate { id: String, name: String },
     FilesGo,
     FilesUp,
-    OpenEntry {
-        path: String,
-        is_directory: bool,
-    },
+    OpenEntry { path: String, is_directory: bool },
     SaveFile,
     ReloadEditor,
     FileMkdir,
@@ -712,31 +695,16 @@ enum Action {
     CreateDbHost,
     ToggleCreateDbHost,
     TestDbHost(String),
-    AskDeleteDbHost {
-        id: String,
-        name: String,
-    },
+    AskDeleteDbHost { id: String, name: String },
     ShowDbHost(String),
     CloseDbHost,
-    CreateServerDb,
-    AskDeleteDb {
-        id: String,
-        name: String,
-    },
+    CreatePodDb,
+    AskDeleteDb { id: String, name: String },
     CreateBackup,
-    AskDeleteBackup {
-        id: String,
-        name: String,
-    },
-    AskRestoreBackup {
-        id: String,
-        name: String,
-    },
+    AskDeleteBackup { id: String, name: String },
+    AskRestoreBackup { id: String, name: String },
     DownloadBackup(String),
-    AskDeleteProxy {
-        id: String,
-        domain: String,
-    },
+    AskDeleteProxy { id: String, domain: String },
     SendRaw,
     ConsoleClear,
     SendCommand,
@@ -744,7 +712,7 @@ enum Action {
     ConfirmNo,
     ClearNodeSecret,
     ClearCreatedDb,
-    SaveServerConfig,
+    SavePodConfig,
     ScheduleNew,
     ScheduleEdit(String),
     ScheduleSave,
@@ -760,9 +728,7 @@ enum Action {
     NodeRotate,
     NodeDelete,
     NodeUpdatesCheck,
-    NodeUpdatesApply {
-        reboot: bool,
-    },
+    NodeUpdatesApply { reboot: bool },
     NodeReboot,
     TemplatePublish,
     TemplateFeed,
@@ -786,14 +752,14 @@ struct MeInfo {
     #[serde(default)]
     scopes: Vec<String>,
     #[serde(default)]
-    server_ids: Vec<String>,
+    pod_ids: Vec<String>,
     #[serde(default)]
     expires_at: Option<String>,
 }
 
 #[derive(Deserialize)]
-struct ServersResponse {
-    servers: Vec<Server>,
+struct PodsResponse {
+    pods: Vec<Pod>,
 }
 
 #[derive(Deserialize)]
@@ -817,8 +783,8 @@ struct DbHostsResponse {
 }
 
 #[derive(Deserialize)]
-struct ServerDbsResponse {
-    databases: Vec<ServerDatabase>,
+struct PodDbsResponse {
+    databases: Vec<PodDatabase>,
 }
 
 #[derive(Deserialize)]
@@ -836,7 +802,7 @@ struct Startup {
     key: String,
     remember: bool,
     tab: Tab,
-    server: Option<String>,
+    pod: Option<String>,
     config_note: Option<String>,
 }
 
@@ -923,7 +889,7 @@ fn main() -> eframe::Result<()> {
         .and_then(|saved| saved.last_tab.as_deref())
         .and_then(Tab::from_saved)
         .unwrap_or(Tab::Overview);
-    let server = saved.as_ref().and_then(|saved| saved.last_server.clone());
+    let pod = saved.as_ref().and_then(|saved| saved.last_pod.clone());
     let config_note = match (&saved_path, saved.as_ref()) {
         (Some(path), Some(_)) => Some(format!("Loaded settings from {}", path.display())),
         _ => None,
@@ -934,7 +900,7 @@ fn main() -> eframe::Result<()> {
         key,
         remember,
         tab,
-        server,
+        pod,
         config_note,
     };
 
@@ -973,22 +939,22 @@ struct App {
     inflight: usize,
     me: Option<MeInfo>,
 
-    servers: Vec<Server>,
-    server_filter: String,
-    server_filter_state: String,
-    server_filter_node: String,
+    pods: Vec<Pod>,
+    pod_filter: String,
+    pod_filter_state: String,
+    pod_filter_node: String,
     audit_limit: i64,
-    servers_loaded: bool,
-    servers_last_refresh: Instant,
-    selected_server: Option<String>,
-    pending_select_server: Option<String>,
-    server_detail: Option<ServerDetail>,
-    stats: Option<ServerStats>,
+    pods_loaded: bool,
+    pods_last_refresh: Instant,
+    selected_pod: Option<String>,
+    pending_select_pod: Option<String>,
+    pod_detail: Option<PodDetail>,
+    stats: Option<PodStats>,
     stats_error: Option<String>,
 
-    create_server: CreateServerForm,
+    create_pod: CreatePodForm,
     edit_limits: EditLimitsForm,
-    server_config: ServerConfigForm,
+    pod_config: PodConfigForm,
 
     console_logs: HashMap<String, ConsoleLog>,
     console_input: String,
@@ -1033,9 +999,9 @@ struct App {
 
     db_hosts: Vec<DatabaseHost>,
     db_host_view: Option<String>,
-    server_dbs: Vec<ServerDatabase>,
+    pod_dbs: Vec<PodDatabase>,
     create_db_host: CreateDbHostForm,
-    create_server_db: CreateServerDbForm,
+    create_pod_db: CreatePodDbForm,
     created_db: Option<CreatedDbInfo>,
     show_created_password: bool,
 
@@ -1084,21 +1050,21 @@ impl App {
             toast: None,
             inflight: 0,
             me: None,
-            servers: Vec::new(),
-            server_filter: String::new(),
-            server_filter_state: String::new(),
-            server_filter_node: String::new(),
+            pods: Vec::new(),
+            pod_filter: String::new(),
+            pod_filter_state: String::new(),
+            pod_filter_node: String::new(),
             audit_limit: 200,
-            servers_loaded: false,
-            servers_last_refresh: Instant::now() - Duration::from_secs(60),
-            selected_server: None,
-            pending_select_server: startup.server,
-            server_detail: None,
+            pods_loaded: false,
+            pods_last_refresh: Instant::now() - Duration::from_secs(60),
+            selected_pod: None,
+            pending_select_pod: startup.pod,
+            pod_detail: None,
             stats: None,
             stats_error: None,
-            create_server: CreateServerForm::new(),
+            create_pod: CreatePodForm::new(),
             edit_limits: EditLimitsForm::default(),
-            server_config: ServerConfigForm::default(),
+            pod_config: PodConfigForm::default(),
             console_logs: HashMap::new(),
             console_input: String::new(),
             console_stream: true,
@@ -1138,9 +1104,9 @@ impl App {
             egg_public_key: String::new(),
             db_hosts: Vec::new(),
             db_host_view: None,
-            server_dbs: Vec::new(),
+            pod_dbs: Vec::new(),
             create_db_host: CreateDbHostForm::new(),
-            create_server_db: CreateServerDbForm::default(),
+            create_pod_db: CreatePodDbForm::default(),
             created_db: None,
             show_created_password: false,
             backups: Vec::new(),
@@ -1269,7 +1235,7 @@ impl App {
 
     fn refresh_all(&mut self) {
         self.refresh_me();
-        self.refresh_servers();
+        self.refresh_pods();
         self.refresh_nodes();
         self.refresh_templates();
         self.refresh_feature("healthz", "/healthz");
@@ -1280,18 +1246,18 @@ impl App {
         self.send(Tag::Me, "GET", "/api/v1/me".to_string(), None);
     }
 
-    fn refresh_servers(&mut self) {
-        self.servers_last_refresh = Instant::now();
-        let mut path = "/api/v1/servers?limit=500".to_string();
-        if !self.server_filter_state.is_empty() {
+    fn refresh_pods(&mut self) {
+        self.pods_last_refresh = Instant::now();
+        let mut path = "/api/v1/pods?limit=500".to_string();
+        if !self.pod_filter_state.is_empty() {
             path.push_str("&state=");
-            path.push_str(&self.server_filter_state);
+            path.push_str(&self.pod_filter_state);
         }
-        if !self.server_filter_node.is_empty() {
+        if !self.pod_filter_node.is_empty() {
             path.push_str("&node_id=");
-            path.push_str(&self.server_filter_node);
+            path.push_str(&self.pod_filter_node);
         }
-        self.send(Tag::Servers, "GET", path, None);
+        self.send(Tag::Pods, "GET", path, None);
     }
 
     fn refresh_nodes(&mut self) {
@@ -1302,20 +1268,20 @@ impl App {
         self.send(Tag::Templates, "GET", "/api/v1/templates".to_string(), None);
     }
 
-    fn refresh_server_detail(&mut self, id: &str) {
+    fn refresh_pod_detail(&mut self, id: &str) {
         self.send(
-            Tag::ServerDetail(id.to_string()),
+            Tag::PodDetail(id.to_string()),
             "GET",
-            format!("/api/v1/servers/{id}"),
+            format!("/api/v1/pods/{id}"),
             None,
         );
     }
 
     fn refresh_stats(&mut self, id: &str) {
         self.send(
-            Tag::ServerStats(id.to_string()),
+            Tag::PodStats(id.to_string()),
             "GET",
-            format!("/api/v1/servers/{id}/stats"),
+            format!("/api/v1/pods/{id}/stats"),
             None,
         );
     }
@@ -1330,7 +1296,7 @@ impl App {
     }
 
     fn refresh_files(&mut self) {
-        let Some(server) = self.selected_server.clone() else {
+        let Some(pod) = self.selected_pod.clone() else {
             return;
         };
         let path = self.files.path.clone();
@@ -1338,11 +1304,11 @@ impl App {
         self.files.list_error = None;
         self.send(
             Tag::FilesList {
-                server: server.clone(),
+                pod: pod.clone(),
                 path: path.clone(),
             },
             "GET",
-            format!("/api/v1/servers/{server}/files?path={}", encode_path(&path)),
+            format!("/api/v1/pods/{pod}/files?path={}", encode_path(&path)),
             None,
         );
     }
@@ -1356,26 +1322,26 @@ impl App {
         );
     }
 
-    fn refresh_server_dbs(&mut self) {
-        let Some(server) = self.selected_server.clone() else {
+    fn refresh_pod_dbs(&mut self) {
+        let Some(pod) = self.selected_pod.clone() else {
             return;
         };
         self.send(
-            Tag::ServerDbs(server.clone()),
+            Tag::PodDbs(pod.clone()),
             "GET",
-            format!("/api/v1/servers/{server}/databases"),
+            format!("/api/v1/pods/{pod}/databases"),
             None,
         );
     }
 
     fn refresh_backups(&mut self) {
-        let Some(server) = self.selected_server.clone() else {
+        let Some(pod) = self.selected_pod.clone() else {
             return;
         };
         self.send(
-            Tag::Backups(server.clone()),
+            Tag::Backups(pod.clone()),
             "GET",
-            format!("/api/v1/servers/{server}/backups"),
+            format!("/api/v1/pods/{pod}/backups"),
             None,
         );
     }
@@ -1434,49 +1400,49 @@ impl App {
     fn refresh_tab(&mut self) {
         match self.tab {
             Tab::Overview => self.refresh_all(),
-            Tab::Servers | Tab::Console => self.refresh_servers(),
+            Tab::Pods | Tab::Console => self.refresh_pods(),
             Tab::Files => {
-                if !self.servers_loaded {
-                    self.refresh_servers();
+                if !self.pods_loaded {
+                    self.refresh_pods();
                 }
-                if self.selected_server.is_some() {
+                if self.selected_pod.is_some() {
                     self.refresh_files();
                 }
             }
             Tab::Config => {
-                if let Some(server) = self.selected_server.clone() {
-                    self.refresh_server_detail(&server);
+                if let Some(pod) = self.selected_pod.clone() {
+                    self.refresh_pod_detail(&pod);
                 }
             }
             Tab::Schedules => {
-                if let Some(server) = self.selected_server.clone() {
+                if let Some(pod) = self.selected_pod.clone() {
                     self.refresh_feature(
-                        &format!("schedules:{server}"),
-                        &format!("/api/v1/servers/{server}/schedules"),
+                        &format!("schedules:{pod}"),
+                        &format!("/api/v1/pods/{pod}/schedules"),
                     );
                 }
             }
             Tab::Sftp => {
-                if let Some(server) = self.selected_server.clone() {
+                if let Some(pod) = self.selected_pod.clone() {
                     self.refresh_feature(
-                        &format!("sftp:{server}"),
-                        &format!("/api/v1/servers/{server}/sftp"),
+                        &format!("sftp:{pod}"),
+                        &format!("/api/v1/pods/{pod}/sftp"),
                     );
                 }
             }
             Tab::Environment => {
-                if let Some(server) = self.selected_server.clone() {
+                if let Some(pod) = self.selected_pod.clone() {
                     self.refresh_feature(
-                        &format!("environment:{server}"),
-                        &format!("/api/v1/servers/{server}/environment"),
+                        &format!("environment:{pod}"),
+                        &format!("/api/v1/pods/{pod}/environment"),
                     );
                 }
             }
             Tab::Jobs => {
-                if let Some(server) = self.selected_server.clone() {
+                if let Some(pod) = self.selected_pod.clone() {
                     self.refresh_feature(
-                        &format!("jobs:{server}"),
-                        &format!("/api/v1/servers/{server}/jobs"),
+                        &format!("jobs:{pod}"),
+                        &format!("/api/v1/pods/{pod}/jobs"),
                     );
                 }
             }
@@ -1506,8 +1472,8 @@ impl App {
             }
             Tab::Databases => {
                 self.refresh_db_hosts();
-                if self.selected_server.is_some() {
-                    self.refresh_server_dbs();
+                if self.selected_pod.is_some() {
+                    self.refresh_pod_dbs();
                 }
             }
             Tab::Notifications => {
@@ -1516,7 +1482,7 @@ impl App {
             }
             Tab::ApiKeys => self.refresh_feature("api_keys", "/api/v1/api-keys"),
             Tab::Backups => {
-                if self.selected_server.is_some() {
+                if self.selected_pod.is_some() {
                     self.refresh_backups();
                 }
             }
@@ -1539,44 +1505,44 @@ impl App {
         self.refresh_tab();
     }
 
-    fn select_server(&mut self, id: String) {
-        if self.selected_server.as_deref() == Some(id.as_str()) {
+    fn select_pod(&mut self, id: String) {
+        if self.selected_pod.as_deref() == Some(id.as_str()) {
             return;
         }
-        self.selected_server = Some(id.clone());
-        self.server_detail = None;
+        self.selected_pod = Some(id.clone());
+        self.pod_detail = None;
         self.stats = None;
         self.stats_error = None;
         self.files = FilesState::fresh();
-        self.server_dbs.clear();
+        self.pod_dbs.clear();
         self.backups.clear();
         self.console_input.clear();
         self.schedule_form = ScheduleForm::new();
-        self.schedule_form.server = Some(id.clone());
+        self.schedule_form.pod = Some(id.clone());
         self.sftp_ttl.clear();
         self.attach_allocation = None;
         self.feature_values.remove("sftp_created");
-        self.feature_values.remove("server_free");
+        self.feature_values.remove("pod_free");
         self.prefs_dirty = true;
-        self.refresh_server_detail(&id);
+        self.refresh_pod_detail(&id);
         self.refresh_stats(&id);
         match self.tab {
             Tab::Files => self.refresh_files(),
-            Tab::Databases => self.refresh_server_dbs(),
+            Tab::Databases => self.refresh_pod_dbs(),
             Tab::Backups => self.refresh_backups(),
             Tab::Schedules => self.refresh_feature(
                 &format!("schedules:{id}"),
-                &format!("/api/v1/servers/{id}/schedules"),
+                &format!("/api/v1/pods/{id}/schedules"),
             ),
             Tab::Sftp => {
-                self.refresh_feature(&format!("sftp:{id}"), &format!("/api/v1/servers/{id}/sftp"))
+                self.refresh_feature(&format!("sftp:{id}"), &format!("/api/v1/pods/{id}/sftp"))
             }
             Tab::Environment => self.refresh_feature(
                 &format!("environment:{id}"),
-                &format!("/api/v1/servers/{id}/environment"),
+                &format!("/api/v1/pods/{id}/environment"),
             ),
             Tab::Jobs => {
-                self.refresh_feature(&format!("jobs:{id}"), &format!("/api/v1/servers/{id}/jobs"))
+                self.refresh_feature(&format!("jobs:{id}"), &format!("/api/v1/pods/{id}/jobs"))
             }
             _ => {}
         }
@@ -1637,42 +1603,42 @@ impl App {
                     }
                 }
             }
-            Tag::Servers => {
+            Tag::Pods => {
                 if let Some(response) = self.ok(outcome) {
-                    match response.json::<ServersResponse>() {
+                    match response.json::<PodsResponse>() {
                         Ok(list) => {
-                            self.servers = list.servers;
-                            self.servers_loaded = true;
-                            self.reconcile_server_selection();
+                            self.pods = list.pods;
+                            self.pods_loaded = true;
+                            self.reconcile_pod_selection();
                         }
                         Err(error) => self.toast_error(error),
                     }
                 }
             }
-            Tag::ServerDetail(id) => {
+            Tag::PodDetail(id) => {
                 if let Some(response) = self.ok(outcome) {
-                    match response.json::<ServerDetail>() {
+                    match response.json::<PodDetail>() {
                         Ok(detail) => {
-                            if self.selected_server.as_deref() == Some(id.as_str()) {
-                                if self.server_config.server.as_deref() != Some(id.as_str()) {
-                                    self.server_config.load(&detail.server);
+                            if self.selected_pod.as_deref() == Some(id.as_str()) {
+                                if self.pod_config.pod.as_deref() != Some(id.as_str()) {
+                                    self.pod_config.load(&detail.pod);
                                 }
-                                let node_id = detail.server.node_id.to_string();
+                                let node_id = detail.pod.node_id.to_string();
                                 self.refresh_feature(
-                                    &format!("server_free:{id}"),
+                                    &format!("pod_free:{id}"),
                                     &format!("/api/v1/allocations?node_id={node_id}"),
                                 );
-                                self.server_detail = Some(detail);
+                                self.pod_detail = Some(detail);
                             }
                         }
                         Err(error) => self.toast_error(error),
                     }
                 }
             }
-            Tag::ServerStats(id) => match outcome {
-                Ok(response) if response.is_success() => match response.json::<ServerStats>() {
+            Tag::PodStats(id) => match outcome {
+                Ok(response) if response.is_success() => match response.json::<PodStats>() {
                     Ok(stats) => {
-                        if self.selected_server.as_deref() == Some(id.as_str()) {
+                        if self.selected_pod.as_deref() == Some(id.as_str()) {
                             self.stats = Some(stats);
                             self.stats_error = None;
                         }
@@ -1746,9 +1712,9 @@ impl App {
                     }
                 }
             }
-            Tag::FilesList { server, path } => {
+            Tag::FilesList { pod, path } => {
                 self.files.loading = false;
-                if self.selected_server.as_deref() != Some(server.as_str()) {
+                if self.selected_pod.as_deref() != Some(pod.as_str()) {
                     return;
                 }
                 match outcome {
@@ -1780,8 +1746,8 @@ impl App {
                     Err(error) => self.files.list_error = Some(error),
                 }
             }
-            Tag::FileRead { server, path } => {
-                if self.selected_server.as_deref() != Some(server.as_str()) {
+            Tag::FileRead { pod, path } => {
+                if self.selected_pod.as_deref() != Some(pod.as_str()) {
                     return;
                 }
                 if let Some(response) = self.ok(outcome) {
@@ -1809,19 +1775,19 @@ impl App {
                     }
                 }
             }
-            Tag::ServerDbs(server) => {
-                if self.selected_server.as_deref() != Some(server.as_str()) {
+            Tag::PodDbs(pod) => {
+                if self.selected_pod.as_deref() != Some(pod.as_str()) {
                     return;
                 }
                 if let Some(response) = self.ok(outcome) {
-                    match response.json::<ServerDbsResponse>() {
-                        Ok(list) => self.server_dbs = list.databases,
+                    match response.json::<PodDbsResponse>() {
+                        Ok(list) => self.pod_dbs = list.databases,
                         Err(error) => self.toast_error(error),
                     }
                 }
             }
-            Tag::Backups(server) => {
-                if self.selected_server.as_deref() != Some(server.as_str()) {
+            Tag::Backups(pod) => {
+                if self.selected_pod.as_deref() != Some(pod.as_str()) {
                     return;
                 }
                 if let Some(response) = self.ok(outcome) {
@@ -2021,21 +1987,21 @@ impl App {
                             value.get("results").and_then(Value::as_array).map(Vec::len)
                         })
                         .unwrap_or(0);
-                    self.toast_success(format!("Bulk power queued for {count} server(s)"));
-                    self.refresh_servers();
+                    self.toast_success(format!("Bulk power queued for {count} pod(s)"));
+                    self.refresh_pods();
                 }
             }
-            Tag::AllocationAttach { server, .. } => {
+            Tag::AllocationAttach { pod, .. } => {
                 if self.ok(outcome).is_some() {
                     self.toast_success("Allocation attached");
-                    self.refresh_server_detail(&server);
+                    self.refresh_pod_detail(&pod);
                     self.attach_allocation = None;
                 }
             }
-            Tag::AllocationDetach { server, .. } => {
+            Tag::AllocationDetach { pod, .. } => {
                 if self.ok(outcome).is_some() {
                     self.toast_success("Allocation detached");
-                    self.refresh_server_detail(&server);
+                    self.refresh_pod_detail(&pod);
                 }
             }
             Tag::BulkCommand => {
@@ -2046,7 +2012,7 @@ impl App {
                             value.get("results").and_then(Value::as_array).map(Vec::len)
                         })
                         .unwrap_or(0);
-                    self.toast_success(format!("Bulk command queued for {count} server(s)"));
+                    self.toast_success(format!("Bulk command queued for {count} pod(s)"));
                 }
             }
             Tag::Raw => match outcome {
@@ -2063,21 +2029,21 @@ impl App {
                     self.raw_view = None;
                 }
             },
-            Tag::ServerCreate => self.handle_server_create(outcome),
-            Tag::ServerUpdate { server } => {
+            Tag::PodCreate => self.handle_pod_create(outcome),
+            Tag::PodUpdate { pod } => {
                 if self.ok(outcome).is_some() {
-                    self.toast_success(format!("Server {} updated", short_id(&server)));
-                    self.refresh_servers();
-                    self.refresh_server_detail(&server);
-                    self.refresh_stats(&server);
+                    self.toast_success(format!("Pod {} updated", short_id(&pod)));
+                    self.refresh_pods();
+                    self.refresh_pod_detail(&pod);
+                    self.refresh_stats(&pod);
                 }
             }
-            Tag::ServerPower { server, action } => {
+            Tag::PodPower { pod, action } => {
                 if self.ok(outcome).is_some() {
-                    self.toast_success(format!("{action} requested for {}", short_id(&server)));
-                    self.refresh_servers();
-                    self.refresh_server_detail(&server);
-                    self.refresh_stats(&server);
+                    self.toast_success(format!("{action} requested for {}", short_id(&pod)));
+                    self.refresh_pods();
+                    self.refresh_pod_detail(&pod);
+                    self.refresh_stats(&pod);
                 }
             }
             Tag::ConsoleCommand { .. } => {
@@ -2085,33 +2051,33 @@ impl App {
                     self.toast_success("Console command sent");
                 }
             }
-            Tag::ServerReinstall { server } => {
+            Tag::PodReinstall { pod } => {
                 if self.ok(outcome).is_some() {
-                    self.toast_success(format!("Reinstall requested for {}", short_id(&server)));
-                    self.refresh_servers();
-                    self.refresh_server_detail(&server);
+                    self.toast_success(format!("Reinstall requested for {}", short_id(&pod)));
+                    self.refresh_pods();
+                    self.refresh_pod_detail(&pod);
                 }
             }
-            Tag::ServerSuspend { server, resume } => {
+            Tag::PodSuspend { pod, resume } => {
                 if self.ok(outcome).is_some() {
                     self.toast_success(if resume {
-                        "Server resumed".to_string()
+                        "Pod resumed".to_string()
                     } else {
-                        "Server suspended".to_string()
+                        "Pod suspended".to_string()
                     });
-                    self.refresh_servers();
-                    self.refresh_server_detail(&server);
+                    self.refresh_pods();
+                    self.refresh_pod_detail(&pod);
                 }
             }
-            Tag::ServerDelete { server } => {
+            Tag::PodDelete { pod } => {
                 if self.ok(outcome).is_some() {
-                    self.toast_success(format!("Server {} deleted", short_id(&server)));
-                    if self.selected_server.as_deref() == Some(server.as_str()) {
-                        self.selected_server = None;
-                        self.server_detail = None;
+                    self.toast_success(format!("Pod {} deleted", short_id(&pod)));
+                    if self.selected_pod.as_deref() == Some(pod.as_str()) {
+                        self.selected_pod = None;
+                        self.pod_detail = None;
                         self.stats = None;
                     }
-                    self.refresh_servers();
+                    self.refresh_pods();
                 }
             }
             Tag::NodeCreate => {
@@ -2199,65 +2165,65 @@ impl App {
                     self.refresh_templates();
                 }
             }
-            Tag::FileSave { server } => {
+            Tag::FileSave { pod } => {
                 if self.ok(outcome).is_some() {
                     if let Some(editor) = &mut self.files.editor {
                         editor.dirty = false;
                     }
                     self.toast_success("File saved");
-                    if self.selected_server.as_deref() == Some(server.as_str()) {
+                    if self.selected_pod.as_deref() == Some(pod.as_str()) {
                         self.refresh_files();
                     }
                 }
             }
-            Tag::FileMkdir { server } => {
+            Tag::FileMkdir { pod } => {
                 if self.ok(outcome).is_some() {
                     self.toast_success("Directory created");
                     self.files.new_dir.clear();
-                    if self.selected_server.as_deref() == Some(server.as_str()) {
+                    if self.selected_pod.as_deref() == Some(pod.as_str()) {
                         self.refresh_files();
                     }
                 }
             }
-            Tag::FileRename { server } => {
+            Tag::FileRename { pod } => {
                 if self.ok(outcome).is_some() {
                     self.toast_success("File renamed");
                     self.files.rename_to.clear();
-                    if self.selected_server.as_deref() == Some(server.as_str()) {
+                    if self.selected_pod.as_deref() == Some(pod.as_str()) {
                         self.refresh_files();
                     }
                 }
             }
-            Tag::FileChmod { server } => {
+            Tag::FileChmod { pod } => {
                 if self.ok(outcome).is_some() {
                     self.toast_success("Permissions updated");
-                    if self.selected_server.as_deref() == Some(server.as_str()) {
+                    if self.selected_pod.as_deref() == Some(pod.as_str()) {
                         self.refresh_files();
                     }
                 }
             }
-            Tag::FileDelete { server } => {
+            Tag::FileDelete { pod } => {
                 if self.ok(outcome).is_some() {
                     self.toast_success("File deleted");
                     self.files.selected = None;
                     self.files.editor = None;
-                    if self.selected_server.as_deref() == Some(server.as_str()) {
+                    if self.selected_pod.as_deref() == Some(pod.as_str()) {
                         self.refresh_files();
                     }
                 }
             }
-            Tag::FileCompress { server } => {
+            Tag::FileCompress { pod } => {
                 if self.ok(outcome).is_some() {
                     self.toast_success("Archive created");
-                    if self.selected_server.as_deref() == Some(server.as_str()) {
+                    if self.selected_pod.as_deref() == Some(pod.as_str()) {
                         self.refresh_files();
                     }
                 }
             }
-            Tag::FileDecompress { server } => {
+            Tag::FileDecompress { pod } => {
                 if self.ok(outcome).is_some() {
                     self.toast_success("Archive extracted");
-                    if self.selected_server.as_deref() == Some(server.as_str()) {
+                    if self.selected_pod.as_deref() == Some(pod.as_str()) {
                         self.refresh_files();
                     }
                 }
@@ -2299,7 +2265,7 @@ impl App {
                 Ok(response) => self.toast_error(response.error_message()),
                 Err(error) => self.toast_error(error),
             },
-            Tag::DbCreate { server } => {
+            Tag::DbCreate { pod } => {
                 if let Some(response) = self.ok(outcome) {
                     match serde_json::from_str::<Value>(&response.body) {
                         Ok(value) => {
@@ -2338,8 +2304,8 @@ impl App {
                             });
                             self.show_created_password = false;
                             self.toast_success("Database created; credentials shown below");
-                            if self.selected_server.as_deref() == Some(server.as_str()) {
-                                self.refresh_server_dbs();
+                            if self.selected_pod.as_deref() == Some(pod.as_str()) {
+                                self.refresh_pod_dbs();
                             }
                         }
                         Err(error) => self.toast_error(format!(
@@ -2348,35 +2314,35 @@ impl App {
                     }
                 }
             }
-            Tag::DbDelete { server, .. } => {
+            Tag::DbDelete { pod, .. } => {
                 if self.ok(outcome).is_some() {
                     self.toast_success("Database deleted");
-                    if self.selected_server.as_deref() == Some(server.as_str()) {
-                        self.refresh_server_dbs();
+                    if self.selected_pod.as_deref() == Some(pod.as_str()) {
+                        self.refresh_pod_dbs();
                     }
                 }
             }
-            Tag::BackupCreate { server } => {
+            Tag::BackupCreate { pod } => {
                 if self.ok(outcome).is_some() {
                     self.toast_success("Backup started");
                     self.backup_name.clear();
-                    if self.selected_server.as_deref() == Some(server.as_str()) {
+                    if self.selected_pod.as_deref() == Some(pod.as_str()) {
                         self.refresh_backups();
                     }
                 }
             }
-            Tag::BackupDelete { server, .. } => {
+            Tag::BackupDelete { pod, .. } => {
                 if self.ok(outcome).is_some() {
                     self.toast_success("Backup deleted");
-                    if self.selected_server.as_deref() == Some(server.as_str()) {
+                    if self.selected_pod.as_deref() == Some(pod.as_str()) {
                         self.refresh_backups();
                     }
                 }
             }
-            Tag::BackupRestore { server, .. } => {
+            Tag::BackupRestore { pod, .. } => {
                 if self.ok(outcome).is_some() {
                     self.toast_success("Restore started");
-                    if self.selected_server.as_deref() == Some(server.as_str()) {
+                    if self.selected_pod.as_deref() == Some(pod.as_str()) {
                         self.refresh_backups();
                     }
                 }
@@ -2451,20 +2417,20 @@ impl App {
         }
     }
 
-    fn handle_server_create(&mut self, outcome: Result<ApiResponse, String>) {
+    fn handle_pod_create(&mut self, outcome: Result<ApiResponse, String>) {
         if let Some(response) = self.ok(outcome) {
-            match response.json::<ServerDetail>() {
+            match response.json::<PodDetail>() {
                 Ok(detail) => {
-                    let id = detail.server.id.to_string();
-                    let name = detail.server.name.clone();
-                    self.selected_server = Some(id.clone());
-                    self.server_detail = Some(detail);
+                    let id = detail.pod.id.to_string();
+                    let name = detail.pod.name.clone();
+                    self.selected_pod = Some(id.clone());
+                    self.pod_detail = Some(detail);
                     self.stats = None;
-                    self.toast_success(format!("Server '{name}' created"));
-                    self.create_server.name.clear();
-                    self.create_server.show = false;
-                    self.create_server.error = None;
-                    self.refresh_servers();
+                    self.toast_success(format!("Pod '{name}' created"));
+                    self.create_pod.name.clear();
+                    self.create_pod.show = false;
+                    self.create_pod.error = None;
+                    self.refresh_pods();
                     self.refresh_stats(&id);
                 }
                 Err(error) => self.toast_error(error),
@@ -2472,32 +2438,24 @@ impl App {
         }
     }
 
-    fn reconcile_server_selection(&mut self) {
-        if let Some(pending) = self.pending_select_server.take() {
-            if self
-                .servers
-                .iter()
-                .any(|server| server.id.to_string() == pending)
-            {
-                self.select_server(pending);
+    fn reconcile_pod_selection(&mut self) {
+        if let Some(pending) = self.pending_select_pod.take() {
+            if self.pods.iter().any(|pod| pod.id.to_string() == pending) {
+                self.select_pod(pending);
                 return;
             }
         }
-        if let Some(selected) = &self.selected_server {
-            if !self
-                .servers
-                .iter()
-                .any(|server| server.id.to_string() == *selected)
-            {
-                self.selected_server = None;
-                self.server_detail = None;
+        if let Some(selected) = &self.selected_pod {
+            if !self.pods.iter().any(|pod| pod.id.to_string() == *selected) {
+                self.selected_pod = None;
+                self.pod_detail = None;
                 self.stats = None;
             }
         }
-        if self.selected_server.is_none() {
-            if let Some(first) = self.servers.first() {
+        if self.selected_pod.is_none() {
+            if let Some(first) = self.pods.first() {
                 let id = first.id.to_string();
-                self.select_server(id);
+                self.select_pod(id);
             }
         }
     }
@@ -2508,12 +2466,12 @@ impl App {
         for event in self.console_worker.drain() {
             match event {
                 ConsoleEvent::Lines {
-                    server_id,
+                    pod_id,
                     lines,
                     cursor,
                     truncated,
                 } => {
-                    let log = self.console_logs.entry(server_id).or_default();
+                    let log = self.console_logs.entry(pod_id).or_default();
                     if let Some(hint) = log.clear_hint.take() {
                         let overlap = tail_overlap(&hint, &lines);
                         if overlap < lines.len() {
@@ -2531,8 +2489,8 @@ impl App {
                     log.last_error = None;
                     log.last_update = Some(Instant::now());
                 }
-                ConsoleEvent::Error { server_id, message } => {
-                    let log = self.console_logs.entry(server_id).or_default();
+                ConsoleEvent::Error { pod_id, message } => {
+                    let log = self.console_logs.entry(pod_id).or_default();
                     log.last_error = Some(message);
                     log.last_update = Some(Instant::now());
                 }
@@ -2547,9 +2505,9 @@ impl App {
             ConsoleMode::Poll
         };
         let desired = if self.tab == Tab::Console && self.conn.is_some() {
-            self.selected_server
+            self.selected_pod
                 .clone()
-                .filter(|id| self.server_state(id) == Some(ServerState::Running))
+                .filter(|id| self.pod_state(id) == Some(PodState::Running))
                 .map(|id| (id, mode))
         } else {
             None
@@ -2568,16 +2526,16 @@ impl App {
         self.console_watch = desired;
     }
 
-    fn server_state(&self, id: &str) -> Option<ServerState> {
-        self.servers
+    fn pod_state(&self, id: &str) -> Option<PodState> {
+        self.pods
             .iter()
-            .find(|server| server.id.to_string() == id)
-            .map(|server| server.state)
+            .find(|pod| pod.id.to_string() == id)
+            .map(|pod| pod.state)
     }
 
     fn send_console_command(&mut self) {
-        let Some(server) = self.selected_server.clone() else {
-            self.toast_error("Select a server first");
+        let Some(pod) = self.selected_pod.clone() else {
+            self.toast_error("Select a pod first");
             return;
         };
         let command = self.console_input.trim().to_string();
@@ -2585,11 +2543,9 @@ impl App {
             return;
         }
         self.send(
-            Tag::ConsoleCommand {
-                server: server.clone(),
-            },
+            Tag::ConsoleCommand { pod: pod.clone() },
             "POST",
-            format!("/api/v1/servers/{server}/command"),
+            format!("/api/v1/pods/{pod}/command"),
             Some(json!({ "command": command })),
         );
         self.console_input.clear();
@@ -2615,59 +2571,57 @@ impl App {
                 Action::RefreshTab => self.refresh_tab(),
                 Action::RefreshAll => self.refresh_all(),
                 Action::DismissToast => self.toast = None,
-                Action::SelectServer(id) => self.select_server(id),
-                Action::RefreshServers => self.refresh_servers(),
+                Action::SelectPod(id) => self.select_pod(id),
+                Action::RefreshPods => self.refresh_pods(),
                 Action::RefreshDetail => {
-                    if let Some(server) = self.selected_server.clone() {
-                        self.refresh_server_detail(&server);
+                    if let Some(pod) = self.selected_pod.clone() {
+                        self.refresh_pod_detail(&pod);
                     }
                 }
                 Action::LoadStats => {
-                    if let Some(server) = self.selected_server.clone() {
-                        self.refresh_stats(&server);
+                    if let Some(pod) = self.selected_pod.clone() {
+                        self.refresh_stats(&pod);
                     }
                 }
-                Action::Power { server, signal } => {
+                Action::Power { pod, signal } => {
                     self.send(
-                        Tag::ServerPower {
-                            server: server.clone(),
+                        Tag::PodPower {
+                            pod: pod.clone(),
                             action: signal,
                         },
                         "POST",
-                        format!("/api/v1/servers/{server}/power"),
+                        format!("/api/v1/pods/{pod}/power"),
                         Some(json!({ "signal": signal })),
                     );
                 }
-                Action::Reinstall(server) => {
+                Action::Reinstall(pod) => {
                     self.send(
-                        Tag::ServerReinstall {
-                            server: server.clone(),
-                        },
+                        Tag::PodReinstall { pod: pod.clone() },
                         "POST",
-                        format!("/api/v1/servers/{server}/reinstall"),
+                        format!("/api/v1/pods/{pod}/reinstall"),
                         Some(json!({})),
                     );
                 }
                 Action::SaveLimits => self.save_limits(),
-                Action::Suspend { server, resume } => {
+                Action::Suspend { pod, resume } => {
                     let endpoint = if resume { "resume" } else { "suspend" };
                     self.send(
-                        Tag::ServerSuspend {
-                            server: server.clone(),
+                        Tag::PodSuspend {
+                            pod: pod.clone(),
                             resume,
                         },
                         "POST",
-                        format!("/api/v1/servers/{server}/{endpoint}"),
+                        format!("/api/v1/pods/{pod}/{endpoint}"),
                         Some(json!({})),
                     );
                 }
-                Action::AskDeleteServer { id, name } => {
-                    self.confirm = Some(ConfirmAction::DeleteServer { id, name });
+                Action::AskDeletePod { id, name } => {
+                    self.confirm = Some(ConfirmAction::DeletePod { id, name });
                 }
-                Action::ToggleCreateServer => {
-                    self.create_server.show = !self.create_server.show;
+                Action::ToggleCreatePod => {
+                    self.create_pod.show = !self.create_pod.show;
                 }
-                Action::CreateServer => self.create_server(),
+                Action::CreatePod => self.create_pod(),
                 Action::SelectNode(id) => self.select_node(id),
                 Action::CreateNode => self.create_node(),
                 Action::ToggleCreateNode => {
@@ -2697,16 +2651,16 @@ impl App {
                         self.files.path = path;
                         self.files.selected = None;
                         self.refresh_files();
-                    } else if let Some(server) = self.selected_server.clone() {
+                    } else if let Some(pod) = self.selected_pod.clone() {
                         self.files.selected = Some(path.clone());
                         self.send(
                             Tag::FileRead {
-                                server: server.clone(),
+                                pod: pod.clone(),
                                 path: path.clone(),
                             },
                             "GET",
                             format!(
-                                "/api/v1/servers/{server}/files/content?path={}",
+                                "/api/v1/pods/{pod}/files/content?path={}",
                                 encode_path(&path)
                             ),
                             None,
@@ -2726,8 +2680,8 @@ impl App {
                 Action::FileCompress => self.file_compress(false),
                 Action::FileDecompress => self.file_compress(true),
                 Action::AskDeleteFile(path) => {
-                    if let Some(server) = self.selected_server.clone() {
-                        self.confirm = Some(ConfirmAction::DeleteFile { server, path });
+                    if let Some(pod) = self.selected_pod.clone() {
+                        self.confirm = Some(ConfirmAction::DeleteFile { pod, path });
                     }
                 }
                 Action::CreateDbHost => self.create_db_host(),
@@ -2747,36 +2701,34 @@ impl App {
                 Action::AskDeleteDbHost { id, name } => {
                     self.confirm = Some(ConfirmAction::DeleteDbHost { id, name });
                 }
-                Action::CreateServerDb => self.create_server_db(),
+                Action::CreatePodDb => self.create_pod_db(),
                 Action::AskDeleteDb { id, name } => {
-                    if let Some(server) = self.selected_server.clone() {
-                        self.confirm = Some(ConfirmAction::DeleteDb { server, id, name });
+                    if let Some(pod) = self.selected_pod.clone() {
+                        self.confirm = Some(ConfirmAction::DeleteDb { pod, id, name });
                     }
                 }
                 Action::CreateBackup => {
-                    if let Some(server) = self.selected_server.clone() {
+                    if let Some(pod) = self.selected_pod.clone() {
                         let mut body = Map::new();
                         if !self.backup_name.trim().is_empty() {
                             body.insert("name".to_string(), json!(self.backup_name.trim()));
                         }
                         self.send(
-                            Tag::BackupCreate {
-                                server: server.clone(),
-                            },
+                            Tag::BackupCreate { pod: pod.clone() },
                             "POST",
-                            format!("/api/v1/servers/{server}/backups"),
+                            format!("/api/v1/pods/{pod}/backups"),
                             Some(Value::Object(body)),
                         );
                     }
                 }
                 Action::AskDeleteBackup { id, name } => {
-                    if let Some(server) = self.selected_server.clone() {
-                        self.confirm = Some(ConfirmAction::DeleteBackup { server, id, name });
+                    if let Some(pod) = self.selected_pod.clone() {
+                        self.confirm = Some(ConfirmAction::DeleteBackup { pod, id, name });
                     }
                 }
                 Action::AskRestoreBackup { id, name } => {
-                    if let Some(server) = self.selected_server.clone() {
-                        self.confirm = Some(ConfirmAction::RestoreBackup { server, id, name });
+                    if let Some(pod) = self.selected_pod.clone() {
+                        self.confirm = Some(ConfirmAction::RestoreBackup { pod, id, name });
                     }
                 }
                 Action::DownloadBackup(id) => self.download_backup(&id),
@@ -2790,14 +2742,14 @@ impl App {
                 Action::ConfirmNo => self.confirm = None,
                 Action::ClearNodeSecret => self.node_secret = None,
                 Action::ClearCreatedDb => self.created_db = None,
-                Action::SaveServerConfig => self.save_server_config(),
+                Action::SavePodConfig => self.save_pod_config(),
                 Action::ScheduleNew => self.schedule_new(),
                 Action::ScheduleEdit(id) => self.schedule_edit(&id),
                 Action::ScheduleSave => self.schedule_save(),
                 Action::ScheduleDelete(id) => {
-                    let server = self.selected_server.clone().unwrap_or_default();
+                    let pod = self.selected_pod.clone().unwrap_or_default();
                     let name = self
-                        .feature(&format!("schedules:{server}"))
+                        .feature(&format!("schedules:{pod}"))
                         .and_then(|value| value.get("schedules").and_then(Value::as_array).cloned())
                         .and_then(|items| {
                             items.into_iter().find(|item| {
@@ -2808,14 +2760,14 @@ impl App {
                             item.get("name").and_then(Value::as_str).map(str::to_string)
                         })
                         .unwrap_or_else(|| short_id(&id).to_string());
-                    self.confirm = Some(ConfirmAction::DeleteSchedule { server, id, name });
+                    self.confirm = Some(ConfirmAction::DeleteSchedule { pod, id, name });
                 }
                 Action::ScheduleRun(id) => self.schedule_run(&id),
                 Action::SftpCreate => self.create_sftp(),
                 Action::SftpRevoke(id) => {
-                    let server = self.selected_server.clone().unwrap_or_default();
+                    let pod = self.selected_pod.clone().unwrap_or_default();
                     let username = self
-                        .feature(&format!("sftp:{server}"))
+                        .feature(&format!("sftp:{pod}"))
                         .and_then(|value| {
                             value.get("credentials").and_then(Value::as_array).cloned()
                         })
@@ -2830,11 +2782,7 @@ impl App {
                                 .map(str::to_string)
                         })
                         .unwrap_or_else(|| short_id(&id).to_string());
-                    self.confirm = Some(ConfirmAction::RevokeSftp {
-                        server,
-                        id,
-                        username,
-                    });
+                    self.confirm = Some(ConfirmAction::RevokeSftp { pod, id, username });
                 }
                 Action::ApiKeyCreate => self.create_api_key(),
                 Action::ApiKeyRevoke(id) => {
@@ -2884,21 +2832,19 @@ impl App {
             return;
         };
         match confirm {
-            ConfirmAction::DeleteServer { id, .. } => {
+            ConfirmAction::DeletePod { id, .. } => {
                 self.send(
-                    Tag::ServerDelete { server: id.clone() },
+                    Tag::PodDelete { pod: id.clone() },
                     "DELETE",
-                    format!("/api/v1/servers/{id}"),
+                    format!("/api/v1/pods/{id}"),
                     None,
                 );
             }
-            ConfirmAction::DeleteFile { server, path } => {
+            ConfirmAction::DeleteFile { pod, path } => {
                 self.send(
-                    Tag::FileDelete {
-                        server: server.clone(),
-                    },
+                    Tag::FileDelete { pod: pod.clone() },
                     "DELETE",
-                    format!("/api/v1/servers/{server}/files?path={}", encode_path(&path)),
+                    format!("/api/v1/pods/{pod}/files?path={}", encode_path(&path)),
                     None,
                 );
             }
@@ -2929,36 +2875,36 @@ impl App {
                     None,
                 );
             }
-            ConfirmAction::DeleteDb { server, id, .. } => {
+            ConfirmAction::DeleteDb { pod, id, .. } => {
                 self.send(
                     Tag::DbDelete {
-                        server: server.clone(),
+                        pod: pod.clone(),
                         id: id.clone(),
                     },
                     "DELETE",
-                    format!("/api/v1/servers/{server}/databases/{id}"),
+                    format!("/api/v1/pods/{pod}/databases/{id}"),
                     None,
                 );
             }
-            ConfirmAction::DeleteBackup { server, id, .. } => {
+            ConfirmAction::DeleteBackup { pod, id, .. } => {
                 self.send(
                     Tag::BackupDelete {
-                        server: server.clone(),
+                        pod: pod.clone(),
                         id: id.clone(),
                     },
                     "DELETE",
-                    format!("/api/v1/servers/{server}/backups/{id}"),
+                    format!("/api/v1/pods/{pod}/backups/{id}"),
                     None,
                 );
             }
-            ConfirmAction::RestoreBackup { server, id, .. } => {
+            ConfirmAction::RestoreBackup { pod, id, .. } => {
                 self.send(
                     Tag::BackupRestore {
-                        server: server.clone(),
+                        pod: pod.clone(),
                         id: id.clone(),
                     },
                     "POST",
-                    format!("/api/v1/servers/{server}/backups/{id}/restore"),
+                    format!("/api/v1/pods/{pod}/backups/{id}/restore"),
                     Some(json!({})),
                 );
             }
@@ -2990,21 +2936,21 @@ impl App {
                     None,
                 );
             }
-            ConfirmAction::RevokeSftp { server, id, .. } => {
-                let key = format!("sftp:{server}");
+            ConfirmAction::RevokeSftp { pod, id, .. } => {
+                let key = format!("sftp:{pod}");
                 self.mutate_feature(
                     "sftp_revoke",
                     &key,
                     Some(&key),
                     "DELETE",
-                    format!("/api/v1/servers/{server}/sftp/{id}"),
+                    format!("/api/v1/pods/{pod}/sftp/{id}"),
                     None,
                     "SFTP credential revoked",
                     None,
                 );
             }
-            ConfirmAction::DeleteSchedule { server, id, .. } => {
-                let key = format!("schedules:{server}");
+            ConfirmAction::DeleteSchedule { pod, id, .. } => {
+                let key = format!("schedules:{pod}");
                 self.mutate_feature(
                     "schedule_delete",
                     &key,
@@ -3020,7 +2966,7 @@ impl App {
     }
 
     fn save_file(&mut self) {
-        let Some(server) = self.selected_server.clone() else {
+        let Some(pod) = self.selected_pod.clone() else {
             return;
         };
         let Some(editor) = &self.files.editor else {
@@ -3037,27 +2983,25 @@ impl App {
             "encoding": "utf8",
         });
         self.send(
-            Tag::FileSave {
-                server: server.clone(),
-            },
+            Tag::FileSave { pod: pod.clone() },
             "PUT",
-            format!("/api/v1/servers/{server}/files/content"),
+            format!("/api/v1/pods/{pod}/files/content"),
             Some(body),
         );
     }
 
     fn open_file(&mut self, path: String) {
-        let Some(server) = self.selected_server.clone() else {
+        let Some(pod) = self.selected_pod.clone() else {
             return;
         };
         self.send(
             Tag::FileRead {
-                server: server.clone(),
+                pod: pod.clone(),
                 path: path.clone(),
             },
             "GET",
             format!(
-                "/api/v1/servers/{server}/files/content?path={}",
+                "/api/v1/pods/{pod}/files/content?path={}",
                 encode_path(&path)
             ),
             None,
@@ -3065,7 +3009,7 @@ impl App {
     }
 
     fn file_mkdir(&mut self) {
-        let Some(server) = self.selected_server.clone() else {
+        let Some(pod) = self.selected_pod.clone() else {
             return;
         };
         let name = self.files.new_dir.trim();
@@ -3074,17 +3018,15 @@ impl App {
         }
         let path = resolve_path(&self.files.path, name);
         self.send(
-            Tag::FileMkdir {
-                server: server.clone(),
-            },
+            Tag::FileMkdir { pod: pod.clone() },
             "POST",
-            format!("/api/v1/servers/{server}/files/mkdir"),
+            format!("/api/v1/pods/{pod}/files/mkdir"),
             Some(json!({ "path": path })),
         );
     }
 
     fn file_rename(&mut self) {
-        let Some(server) = self.selected_server.clone() else {
+        let Some(pod) = self.selected_pod.clone() else {
             return;
         };
         let Some(from) = self.files.selected.clone() else {
@@ -3097,17 +3039,15 @@ impl App {
         }
         let to = resolve_path(&self.files.path, target);
         self.send(
-            Tag::FileRename {
-                server: server.clone(),
-            },
+            Tag::FileRename { pod: pod.clone() },
             "POST",
-            format!("/api/v1/servers/{server}/files/rename"),
+            format!("/api/v1/pods/{pod}/files/rename"),
             Some(json!({ "from": from, "to": to })),
         );
     }
 
     fn file_chmod(&mut self) {
-        let Some(server) = self.selected_server.clone() else {
+        let Some(pod) = self.selected_pod.clone() else {
             return;
         };
         let Some(path) = self.files.selected.clone() else {
@@ -3119,17 +3059,15 @@ impl App {
             return;
         }
         self.send(
-            Tag::FileChmod {
-                server: server.clone(),
-            },
+            Tag::FileChmod { pod: pod.clone() },
             "POST",
-            format!("/api/v1/servers/{server}/files/chmod"),
+            format!("/api/v1/pods/{pod}/files/chmod"),
             Some(json!({ "path": path, "mode": mode })),
         );
     }
 
     fn file_compress(&mut self, decompress: bool) {
-        let Some(server) = self.selected_server.clone() else {
+        let Some(pod) = self.selected_pod.clone() else {
             return;
         };
         let Some(path) = self.files.selected.clone() else {
@@ -3138,69 +3076,65 @@ impl App {
         };
         let action = if decompress { "decompress" } else { "compress" };
         let tag = if decompress {
-            Tag::FileDecompress {
-                server: server.clone(),
-            }
+            Tag::FileDecompress { pod: pod.clone() }
         } else {
-            Tag::FileCompress {
-                server: server.clone(),
-            }
+            Tag::FileCompress { pod: pod.clone() }
         };
         self.send(
             tag,
             "POST",
-            format!("/api/v1/servers/{server}/files/{action}"),
+            format!("/api/v1/pods/{pod}/files/{action}"),
             Some(json!({ "path": path })),
         );
     }
 
-    fn create_server(&mut self) {
-        self.create_server.error = None;
-        let Some(node_id) = self.create_server.node_id.clone() else {
-            self.create_server.error = Some("Select a node".to_string());
+    fn create_pod(&mut self) {
+        self.create_pod.error = None;
+        let Some(node_id) = self.create_pod.node_id.clone() else {
+            self.create_pod.error = Some("Select a node".to_string());
             return;
         };
-        let Some(template_id) = self.create_server.template_id.clone() else {
-            self.create_server.error = Some("Select a template".to_string());
+        let Some(template_id) = self.create_pod.template_id.clone() else {
+            self.create_pod.error = Some("Select a template".to_string());
             return;
         };
-        let name = self.create_server.name.trim().to_string();
+        let name = self.create_pod.name.trim().to_string();
         if name.is_empty() {
-            self.create_server.error = Some("Name is required".to_string());
+            self.create_pod.error = Some("Name is required".to_string());
             return;
         }
-        let memory = match parse_u64(&self.create_server.memory, "memory MB") {
+        let memory = match parse_u64(&self.create_pod.memory, "memory MB") {
             Ok(value) => value,
             Err(error) => {
-                self.create_server.error = Some(error);
+                self.create_pod.error = Some(error);
                 return;
             }
         };
-        let disk = match parse_u64(&self.create_server.disk, "disk MB") {
+        let disk = match parse_u64(&self.create_pod.disk, "disk MB") {
             Ok(value) => value,
             Err(error) => {
-                self.create_server.error = Some(error);
+                self.create_pod.error = Some(error);
                 return;
             }
         };
-        let cpu = match parse_u64(&self.create_server.cpu, "CPU millis") {
+        let cpu = match parse_u64(&self.create_pod.cpu, "CPU millis") {
             Ok(value) => value,
             Err(error) => {
-                self.create_server.error = Some(error);
+                self.create_pod.error = Some(error);
                 return;
             }
         };
-        let auto_allocations = match self.create_server.auto_allocations.trim().parse::<u16>() {
+        let auto_allocations = match self.create_pod.auto_allocations.trim().parse::<u16>() {
             Ok(value) if value > 0 => value,
             _ => {
-                self.create_server.error = Some("Auto allocations must be at least 1".to_string());
+                self.create_pod.error = Some("Auto allocations must be at least 1".to_string());
                 return;
             }
         };
-        let variables = match parse_variables(&self.create_server.variables) {
+        let variables = match parse_variables(&self.create_pod.variables) {
             Ok(variables) => variables,
             Err(error) => {
-                self.create_server.error = Some(error);
+                self.create_pod.error = Some(error);
                 return;
             }
         };
@@ -3220,28 +3154,28 @@ impl App {
             "auto_allocations": auto_allocations,
             "variables": variables,
         });
-        if !self.create_server.description.trim().is_empty() {
-            body["description"] = json!(self.create_server.description.trim());
+        if !self.create_pod.description.trim().is_empty() {
+            body["description"] = json!(self.create_pod.description.trim());
         }
-        if !self.create_server.external_ref.trim().is_empty() {
-            body["external_ref"] = json!(self.create_server.external_ref.trim());
+        if !self.create_pod.external_ref.trim().is_empty() {
+            body["external_ref"] = json!(self.create_pod.external_ref.trim());
         }
-        if !self.create_server.idempotency_key.trim().is_empty() {
-            body["idempotency_key"] = json!(self.create_server.idempotency_key.trim());
+        if !self.create_pod.idempotency_key.trim().is_empty() {
+            body["idempotency_key"] = json!(self.create_pod.idempotency_key.trim());
         }
-        if !self.create_server.template_version.trim().is_empty() {
-            body["template_version"] = json!(self.create_server.template_version.trim());
+        if !self.create_pod.template_version.trim().is_empty() {
+            body["template_version"] = json!(self.create_pod.template_version.trim());
         }
-        if !self.create_server.protocol.trim().is_empty() {
-            body["protocol"] = json!(self.create_server.protocol.trim());
+        if !self.create_pod.protocol.trim().is_empty() {
+            body["protocol"] = json!(self.create_pod.protocol.trim());
         }
-        if !self.create_server.image.trim().is_empty() {
-            body["image"] = json!(self.create_server.image.trim());
+        if !self.create_pod.image.trim().is_empty() {
+            body["image"] = json!(self.create_pod.image.trim());
         }
-        let labels = match parse_json_object(&self.create_server.labels, "Labels") {
+        let labels = match parse_json_object(&self.create_pod.labels, "Labels") {
             Ok(value) => clean_object(value),
             Err(error) => {
-                self.create_server.error = Some(error);
+                self.create_pod.error = Some(error);
                 return;
             }
         };
@@ -3253,17 +3187,17 @@ impl App {
             body["labels"] = labels;
         }
         self.send(
-            Tag::ServerCreate,
+            Tag::PodCreate,
             "POST",
-            "/api/v1/servers".to_string(),
+            "/api/v1/pods".to_string(),
             Some(body),
         );
     }
 
     fn save_limits(&mut self) {
         self.edit_limits.error = None;
-        let Some(server) = self.selected_server.clone() else {
-            self.edit_limits.error = Some("Select a server first".to_string());
+        let Some(pod) = self.selected_pod.clone() else {
+            self.edit_limits.error = Some("Select a pod first".to_string());
             return;
         };
         let memory = match parse_u64(&self.edit_limits.memory, "memory MB") {
@@ -3323,44 +3257,42 @@ impl App {
             limits["cpuset"] = json!(cpuset);
         }
         self.send(
-            Tag::ServerUpdate {
-                server: server.clone(),
-            },
+            Tag::PodUpdate { pod: pod.clone() },
             "PATCH",
-            format!("/api/v1/servers/{server}"),
+            format!("/api/v1/pods/{pod}"),
             Some(json!({ "limits": limits })),
         );
     }
 
-    fn save_server_config(&mut self) {
-        self.server_config.error = None;
-        let Some(server) = self.selected_server.clone() else {
-            self.server_config.error = Some("Select a server first".to_string());
+    fn save_pod_config(&mut self) {
+        self.pod_config.error = None;
+        let Some(pod) = self.selected_pod.clone() else {
+            self.pod_config.error = Some("Select a pod first".to_string());
             return;
         };
-        let labels = match parse_json_object(&self.server_config.labels, "Labels") {
+        let labels = match parse_json_object(&self.pod_config.labels, "Labels") {
             Ok(value) => clean_object(value),
             Err(error) => {
-                self.server_config.error = Some(error);
+                self.pod_config.error = Some(error);
                 return;
             }
         };
         let mut body = json!({
-            "name": self.server_config.name.trim(),
-            "description": self.server_config.description.trim(),
-            "external_ref": self.server_config.external_ref.trim(),
+            "name": self.pod_config.name.trim(),
+            "description": self.pod_config.description.trim(),
+            "external_ref": self.pod_config.external_ref.trim(),
             "labels": labels,
         });
-        if !self.server_config.image.trim().is_empty() {
-            body["image"] = json!(self.server_config.image.trim());
+        if !self.pod_config.image.trim().is_empty() {
+            body["image"] = json!(self.pod_config.image.trim());
         }
-        if !self.server_config.template_version.trim().is_empty() {
-            body["template_version"] = json!(self.server_config.template_version.trim());
+        if !self.pod_config.template_version.trim().is_empty() {
+            body["template_version"] = json!(self.pod_config.template_version.trim());
         }
-        let variables = match parse_json_object(&self.server_config.variables, "Variables") {
+        let variables = match parse_json_object(&self.pod_config.variables, "Variables") {
             Ok(value) => clean_object(value),
             Err(error) => {
-                self.server_config.error = Some(error);
+                self.pod_config.error = Some(error);
                 return;
             }
         };
@@ -3368,11 +3300,9 @@ impl App {
             body["variables"] = variables;
         }
         self.send(
-            Tag::ServerUpdate {
-                server: server.clone(),
-            },
+            Tag::PodUpdate { pod: pod.clone() },
             "PATCH",
-            format!("/api/v1/servers/{server}"),
+            format!("/api/v1/pods/{pod}"),
             Some(body),
         );
     }
@@ -3386,16 +3316,16 @@ impl App {
     }
 
     fn schedule_new(&mut self) {
-        let server = self.selected_server.clone();
+        let pod = self.selected_pod.clone();
         self.schedule_form = ScheduleForm::new();
-        self.schedule_form.server = server;
+        self.schedule_form.pod = pod;
     }
 
     fn schedule_edit(&mut self, id: &str) {
-        let Some(server) = self.selected_server.clone() else {
+        let Some(pod) = self.selected_pod.clone() else {
             return;
         };
-        let Some(value) = self.feature(&format!("schedules:{server}")) else {
+        let Some(value) = self.feature(&format!("schedules:{pod}")) else {
             return;
         };
         let Some(schedule) = value
@@ -3409,7 +3339,7 @@ impl App {
         else {
             return;
         };
-        self.schedule_form.server = Some(server);
+        self.schedule_form.pod = Some(pod);
         self.schedule_form.id = Some(id.to_string());
         self.schedule_form.name = schedule
             .get("name")
@@ -3434,8 +3364,8 @@ impl App {
 
     fn schedule_save(&mut self) {
         self.schedule_form.error = None;
-        let Some(server) = self.selected_server.clone() else {
-            self.schedule_form.error = Some("Select a server first".to_string());
+        let Some(pod) = self.selected_pod.clone() else {
+            self.schedule_form.error = Some("Select a pod first".to_string());
             return;
         };
         let actions = match serde_json::from_str::<Value>(&self.schedule_form.actions) {
@@ -3455,8 +3385,8 @@ impl App {
             "actions": actions,
             "enabled": self.schedule_form.enabled,
         });
-        let key = format!("schedules:{server}");
-        let path = format!("/api/v1/servers/{server}/schedules");
+        let key = format!("schedules:{pod}");
+        let path = format!("/api/v1/pods/{pod}/schedules");
         if let Some(id) = self.schedule_form.id.clone() {
             self.mutate_feature(
                 "schedule",
@@ -3481,7 +3411,7 @@ impl App {
             );
         }
         self.schedule_form = ScheduleForm::new();
-        self.schedule_form.server = Some(server);
+        self.schedule_form.pod = Some(pod);
     }
 
     fn schedule_run(&mut self, id: &str) {
@@ -3498,20 +3428,20 @@ impl App {
     }
 
     fn create_sftp(&mut self) {
-        let Some(server) = self.selected_server.clone() else {
+        let Some(pod) = self.selected_pod.clone() else {
             return;
         };
         let mut body = Map::new();
         if let Ok(ttl) = self.sftp_ttl.trim().parse::<i64>() {
             body.insert("ttl_seconds".to_string(), json!(ttl));
         }
-        let key = format!("sftp:{server}");
+        let key = format!("sftp:{pod}");
         self.mutate_feature(
             "sftp_create",
             &key,
             Some(&key),
             "POST",
-            format!("/api/v1/servers/{server}/sftp"),
+            format!("/api/v1/pods/{pod}/sftp"),
             Some(Value::Object(body)),
             "SFTP credential created",
             Some("sftp_created"),
@@ -3537,15 +3467,15 @@ impl App {
             self.api_key_form.error = Some("At least one scope is required".to_string());
             return;
         }
-        let server_ids: Vec<String> = self
+        let pod_ids: Vec<String> = self
             .api_key_form
-            .server_ids
+            .pod_ids
             .split(',')
             .map(str::trim)
             .filter(|value| !value.is_empty())
             .map(str::to_string)
             .collect();
-        let mut body = json!({ "name": name, "scopes": scopes, "server_ids": server_ids });
+        let mut body = json!({ "name": name, "scopes": scopes, "pod_ids": pod_ids });
         if let Ok(days) = self.api_key_form.days.trim().parse::<i64>() {
             if days > 0 {
                 body["expires_at"] =
@@ -3563,7 +3493,7 @@ impl App {
             Some("api_key_created"),
         );
         self.api_key_form.name.clear();
-        self.api_key_form.server_ids.clear();
+        self.api_key_form.pod_ids.clear();
         self.api_key_form.days.clear();
     }
 
@@ -3846,7 +3776,7 @@ impl App {
     }
 
     fn attach_allocation(&mut self) {
-        let Some(server) = self.selected_server.clone() else {
+        let Some(pod) = self.selected_pod.clone() else {
             return;
         };
         let Some(allocation) = self.attach_allocation.clone() else {
@@ -3855,26 +3785,26 @@ impl App {
         };
         self.send(
             Tag::AllocationAttach {
-                server: server.clone(),
+                pod: pod.clone(),
                 allocation: allocation.clone(),
             },
             "POST",
-            format!("/api/v1/servers/{server}/allocations"),
+            format!("/api/v1/pods/{pod}/allocations"),
             Some(json!({ "allocation_id": allocation })),
         );
     }
 
     fn detach_allocation(&mut self, allocation: &str) {
-        let Some(server) = self.selected_server.clone() else {
+        let Some(pod) = self.selected_pod.clone() else {
             return;
         };
         self.send(
             Tag::AllocationDetach {
-                server: server.clone(),
+                pod: pod.clone(),
                 allocation: allocation.to_string(),
             },
             "DELETE",
-            format!("/api/v1/servers/{server}/allocations/{allocation}"),
+            format!("/api/v1/pods/{pod}/allocations/{allocation}"),
             None,
         );
     }
@@ -3882,21 +3812,21 @@ impl App {
     fn bulk_power(&mut self) {
         let ids: Vec<String> = self.bulk_selected.iter().cloned().collect();
         if ids.is_empty() {
-            self.toast_error("Select at least one server");
+            self.toast_error("Select at least one pod");
             return;
         }
         self.send(
             Tag::BulkPower,
             "POST",
-            "/api/v1/servers/bulk/power".to_string(),
-            Some(json!({ "server_ids": ids, "signal": self.bulk_signal })),
+            "/api/v1/pods/bulk/power".to_string(),
+            Some(json!({ "pod_ids": ids, "signal": self.bulk_signal })),
         );
     }
 
     fn bulk_command(&mut self) {
         let ids: Vec<String> = self.bulk_selected.iter().cloned().collect();
         if ids.is_empty() {
-            self.toast_error("Select at least one server");
+            self.toast_error("Select at least one pod");
             return;
         }
         let command = self.bulk_command.trim().to_string();
@@ -3907,8 +3837,8 @@ impl App {
         self.send(
             Tag::BulkCommand,
             "POST",
-            "/api/v1/servers/bulk/command".to_string(),
-            Some(json!({ "server_ids": ids, "command": command })),
+            "/api/v1/pods/bulk/command".to_string(),
+            Some(json!({ "pod_ids": ids, "command": command })),
         );
         self.bulk_command.clear();
     }
@@ -4101,34 +4031,32 @@ impl App {
         );
     }
 
-    fn create_server_db(&mut self) {
-        self.create_server_db.error = None;
-        let Some(server) = self.selected_server.clone() else {
-            self.create_server_db.error = Some("Select a server first".to_string());
+    fn create_pod_db(&mut self) {
+        self.create_pod_db.error = None;
+        let Some(pod) = self.selected_pod.clone() else {
+            self.create_pod_db.error = Some("Select a pod first".to_string());
             return;
         };
         let mut body = Map::new();
-        if let Some(host_id) = &self.create_server_db.host_id {
+        if let Some(host_id) = &self.create_pod_db.host_id {
             body.insert("host_id".to_string(), json!(host_id));
         }
-        if !self.create_server_db.remote.trim().is_empty() {
+        if !self.create_pod_db.remote.trim().is_empty() {
             body.insert(
                 "remote".to_string(),
-                json!(self.create_server_db.remote.trim()),
+                json!(self.create_pod_db.remote.trim()),
             );
         }
         self.send(
-            Tag::DbCreate {
-                server: server.clone(),
-            },
+            Tag::DbCreate { pod: pod.clone() },
             "POST",
-            format!("/api/v1/servers/{server}/databases"),
+            format!("/api/v1/pods/{pod}/databases"),
             Some(Value::Object(body)),
         );
     }
 
     fn download_backup(&mut self, id: &str) {
-        let Some(server) = self.selected_server.clone() else {
+        let Some(pod) = self.selected_pod.clone() else {
             return;
         };
         let name = self
@@ -4141,10 +4069,10 @@ impl App {
         let destination = directory.join(format!("{}-{}.tar.gz", name, short_id(id)));
         self.download(
             Tag::BackupDownload {
-                server: server.clone(),
+                pod: pod.clone(),
                 id: id.to_string(),
             },
-            format!("/api/v1/servers/{server}/backups/{id}/download"),
+            format!("/api/v1/pods/{pod}/backups/{id}/download"),
             destination,
         );
     }
@@ -4172,8 +4100,8 @@ impl App {
     }
 
     fn clear_console(&mut self) {
-        if let Some(server) = self.selected_server.clone() {
-            let log = self.console_logs.entry(server).or_default();
+        if let Some(pod) = self.selected_pod.clone() {
+            let log = self.console_logs.entry(pod).or_default();
             log.clear_hint = Some(log.lines.clone());
             log.lines.clear();
         }
@@ -4189,7 +4117,7 @@ impl App {
             },
             remember: self.remember,
             last_tab: Some(self.tab.as_str().to_string()),
-            last_server: self.selected_server.clone(),
+            last_pod: self.selected_pod.clone(),
         };
         if let Err(error) = config::save(&saved) {
             if self.config_warning.is_none() {
@@ -4227,7 +4155,7 @@ impl App {
                         .auto_shrink([false, false])
                         .show(ui, |ui| match self.tab {
                             Tab::Overview => self.page_overview(ui, &mut actions),
-                            Tab::Servers => self.page_servers(ui, &mut actions),
+                            Tab::Pods => self.page_pods(ui, &mut actions),
                             Tab::Files => self.page_files(ui, &mut actions),
                             Tab::Config => self.page_config(ui, &mut actions),
                             Tab::Schedules => self.page_schedules(ui, &mut actions),
@@ -4258,9 +4186,9 @@ impl App {
 
         if self.tab == Tab::Console
             && self.conn.is_some()
-            && self.servers_last_refresh.elapsed() > Duration::from_secs(5)
+            && self.pods_last_refresh.elapsed() > Duration::from_secs(5)
         {
-            self.refresh_servers();
+            self.refresh_pods();
         }
         if self.inflight > 0 || self.connecting {
             ctx.request_repaint_after(Duration::from_millis(100));
@@ -4401,7 +4329,7 @@ impl App {
                         ui.heading(RichText::new(APP_TITLE).size(26.0).strong());
                         ui.label(
                             RichText::new(
-                                "Connect to an Ignite Containers control plane to manage nodes, servers and the live console.",
+                                "Connect to an Ignite Containers control plane to manage nodes, pods and the live console.",
                             )
                             .color(Color32::from_rgb(170, 176, 188)),
                         );
@@ -4633,16 +4561,16 @@ impl App {
             );
             overview_card(
                 &mut columns[1],
-                "Servers",
-                self.servers.len(),
+                "Pods",
+                self.pods.len(),
                 format!(
                     "{} running",
-                    self.servers
+                    self.pods
                         .iter()
-                        .filter(|server| server.state == ServerState::Running)
+                        .filter(|pod| pod.state == PodState::Running)
                         .count()
                 ),
-                Tab::Servers,
+                Tab::Pods,
                 actions,
             );
             overview_card(
@@ -4685,11 +4613,11 @@ impl App {
                             .wrap(),
                         );
                         ui.end_row();
-                        ui.label("Server allow-list");
-                        ui.label(if me.server_ids.is_empty() {
-                            "all servers".to_string()
+                        ui.label("Pod allow-list");
+                        ui.label(if me.pod_ids.is_empty() {
+                            "all pods".to_string()
                         } else {
-                            format!("{} server(s)", me.server_ids.len())
+                            format!("{} pod(s)", me.pod_ids.len())
                         });
                         ui.end_row();
                         ui.label("Expires");
@@ -4703,27 +4631,27 @@ impl App {
 
         ui.add_space(12.0);
         ui.group(|ui| {
-            ui.heading("Server states");
-            if self.servers.is_empty() {
+            ui.heading("Pod states");
+            if self.pods.is_empty() {
                 ui.label(
-                    RichText::new("No servers yet. Create one from the Servers tab.")
+                    RichText::new("No pods yet. Create one from the Pods tab.")
                         .color(Color32::from_rgb(150, 156, 168)),
                 );
             } else {
                 let mut counts: HashMap<&'static str, usize> = HashMap::new();
-                for server in &self.servers {
-                    *counts.entry(state_label(server.state)).or_default() += 1;
+                for pod in &self.pods {
+                    *counts.entry(state_label(pod.state)).or_default() += 1;
                 }
                 ui.horizontal_wrapped(|ui| {
                     for state in [
-                        ServerState::Running,
-                        ServerState::Starting,
-                        ServerState::Stopping,
-                        ServerState::Offline,
-                        ServerState::Installing,
-                        ServerState::Suspended,
-                        ServerState::Pending,
-                        ServerState::Unknown,
+                        PodState::Running,
+                        PodState::Starting,
+                        PodState::Stopping,
+                        PodState::Offline,
+                        PodState::Installing,
+                        PodState::Suspended,
+                        PodState::Pending,
+                        PodState::Unknown,
                     ] {
                         let count = counts.get(state_label(state)).copied().unwrap_or(0);
                         if count > 0 {
@@ -4740,36 +4668,36 @@ impl App {
 
     // The remaining pages are implemented below in this file.
 
-    fn page_servers(&mut self, ui: &mut egui::Ui, actions: &mut Vec<Action>) {
+    fn page_pods(&mut self, ui: &mut egui::Ui, actions: &mut Vec<Action>) {
         ui.add_space(6.0);
         ui.horizontal(|ui| {
-            ui.heading("Servers");
+            ui.heading("Pods");
             if ui.button("Refresh").clicked() {
-                actions.push(Action::RefreshServers);
+                actions.push(Action::RefreshPods);
             }
             if ui
-                .button(if self.create_server.show {
+                .button(if self.create_pod.show {
                     "Hide create form"
                 } else {
-                    "Create server"
+                    "Create pod"
                 })
                 .clicked()
             {
-                actions.push(Action::ToggleCreateServer);
+                actions.push(Action::ToggleCreatePod);
             }
             ui.label(
-                RichText::new(format!("{} server(s)", self.servers.len()))
+                RichText::new(format!("{} pod(s)", self.pods.len()))
                     .small()
                     .color(Color32::from_rgb(150, 156, 168)),
             );
             ui.label("Name");
             ui.add(
-                TextEdit::singleline(&mut self.server_filter)
+                TextEdit::singleline(&mut self.pod_filter)
                     .hint_text("contains…")
                     .desired_width(150.0),
             );
-            let mut state_filter = self.server_filter_state.clone();
-            egui::ComboBox::from_id_salt("server_filter_state")
+            let mut state_filter = self.pod_filter_state.clone();
+            egui::ComboBox::from_id_salt("pod_filter_state")
                 .selected_text(if state_filter.is_empty() {
                     "any state".to_string()
                 } else {
@@ -4790,12 +4718,12 @@ impl App {
                         ui.selectable_value(&mut state_filter, state.to_string(), state);
                     }
                 });
-            if state_filter != self.server_filter_state {
-                self.server_filter_state = state_filter;
-                actions.push(Action::RefreshServers);
+            if state_filter != self.pod_filter_state {
+                self.pod_filter_state = state_filter;
+                actions.push(Action::RefreshPods);
             }
-            let mut node_filter = self.server_filter_node.clone();
-            egui::ComboBox::from_id_salt("server_filter_node")
+            let mut node_filter = self.pod_filter_node.clone();
+            egui::ComboBox::from_id_salt("pod_filter_node")
                 .selected_text(
                     self.nodes
                         .iter()
@@ -4808,46 +4736,46 @@ impl App {
                         ui.selectable_value(&mut node_filter, node.id.to_string(), &node.name);
                     }
                 });
-            if node_filter != self.server_filter_node {
-                self.server_filter_node = node_filter;
-                actions.push(Action::RefreshServers);
+            if node_filter != self.pod_filter_node {
+                self.pod_filter_node = node_filter;
+                actions.push(Action::RefreshPods);
             }
         });
 
-        if self.create_server.show {
-            self.render_create_server_form(ui, actions);
+        if self.create_pod.show {
+            self.render_create_pod_form(ui, actions);
         }
 
         ui.add_space(8.0);
         ui.group(|ui| {
             ui.horizontal(|ui| {
-                ui.strong("Server list");
+                ui.strong("Pod list");
                 ui.label(
                     RichText::new("Select a row to manage it")
                         .small()
                         .color(Color32::from_rgb(150, 156, 168)),
                 );
             });
-            if self.servers.is_empty() {
+            if self.pods.is_empty() {
                 ui.label(
-                    RichText::new(if self.servers_loaded {
-                        "No servers yet. Use Create server to provision one."
+                    RichText::new(if self.pods_loaded {
+                        "No pods yet. Use Create pod to provision one."
                     } else {
-                        "Loading servers..."
+                        "Loading pods..."
                     })
                     .color(Color32::from_rgb(150, 156, 168)),
                 );
                 return;
             }
 
-            let selected_server = self.selected_server.clone();
+            let selected_pod = self.selected_pod.clone();
             let node_names: HashMap<String, String> = self
                 .nodes
                 .iter()
                 .map(|node| (node.id.to_string(), node.name.clone()))
                 .collect();
-            let primary_port = self.server_detail.as_ref().and_then(|detail| {
-                let primary = detail.server.primary_allocation_id?;
+            let primary_port = self.pod_detail.as_ref().and_then(|detail| {
+                let primary = detail.pod.primary_allocation_id?;
                 detail
                     .allocations
                     .iter()
@@ -4856,11 +4784,7 @@ impl App {
             });
             ui.horizontal(|ui| {
                 if ui.button("Select all").clicked() {
-                    self.bulk_selected = self
-                        .servers
-                        .iter()
-                        .map(|server| server.id.to_string())
-                        .collect();
+                    self.bulk_selected = self.pods.iter().map(|pod| pod.id.to_string()).collect();
                 }
                 if ui.button("Clear selection").clicked() {
                     self.bulk_selected.clear();
@@ -4885,13 +4809,13 @@ impl App {
                     actions.push(Action::BulkCommand);
                 }
             });
-            let filter = self.server_filter.trim().to_lowercase();
+            let filter = self.pod_filter.trim().to_lowercase();
             ScrollArea::vertical()
-                .id_salt("servers_list")
+                .id_salt("pods_list")
                 .max_height(260.0)
                 .auto_shrink([false, false])
                 .show(ui, |ui| {
-                    egui::Grid::new("servers_grid")
+                    egui::Grid::new("pods_grid")
                         .num_columns(6)
                         .striped(true)
                         .spacing([14.0, 6.0])
@@ -4903,52 +4827,45 @@ impl App {
                             ui.strong("Primary alloc / port");
                             ui.strong("Memory / CPU");
                             ui.end_row();
-                            for server in self.servers.iter().filter(|server| {
-                                filter.is_empty() || server.name.to_lowercase().contains(&filter)
+                            for pod in self.pods.iter().filter(|pod| {
+                                filter.is_empty() || pod.name.to_lowercase().contains(&filter)
                             }) {
-                                let id = server.id.to_string();
+                                let id = pod.id.to_string();
                                 let mut checked = self.bulk_selected.contains(&id);
                                 if ui.checkbox(&mut checked, "").changed() {
                                     actions.push(Action::ToggleBulk(id.clone()));
                                 }
-                                let is_selected = selected_server.as_deref() == Some(id.as_str());
+                                let is_selected = selected_pod.as_deref() == Some(id.as_str());
                                 if ui
-                                    .selectable_label(is_selected, &server.name)
+                                    .selectable_label(is_selected, &pod.name)
                                     .on_hover_text(format!(
                                         "id: {}\nimage: {}\ntemplate: {} {}",
-                                        id,
-                                        server.image,
-                                        server.template_id,
-                                        server.template_version
+                                        id, pod.image, pod.template_id, pod.template_version
                                     ))
                                     .clicked()
                                 {
-                                    actions.push(Action::SelectServer(id.clone()));
+                                    actions.push(Action::SelectPod(id.clone()));
                                 }
-                                ui.colored_label(
-                                    state_color(server.state),
-                                    state_label(server.state),
-                                );
+                                ui.colored_label(state_color(pod.state), state_label(pod.state));
                                 let node = node_names
-                                    .get(&server.node_id.to_string())
+                                    .get(&pod.node_id.to_string())
                                     .cloned()
-                                    .unwrap_or_else(|| short_id(&server.node_id.to_string()));
+                                    .unwrap_or_else(|| short_id(&pod.node_id.to_string()));
                                 truncate_label(ui, &node, 150.0);
                                 let port = if is_selected {
                                     primary_port
                                         .map(|port| port.to_string())
                                         .unwrap_or_else(|| "-".to_string())
                                 } else {
-                                    server
-                                        .primary_allocation_id
+                                    pod.primary_allocation_id
                                         .map(|allocation| short_id(&allocation.to_string()))
                                         .unwrap_or_else(|| "-".to_string())
                                 };
                                 ui.label(port);
                                 ui.label(format!(
                                     "{} MB / {}",
-                                    server.limits.memory_mb,
-                                    format_cpu(server.limits.cpu_millis)
+                                    pod.limits.memory_mb,
+                                    format_cpu(pod.limits.cpu_millis)
                                 ));
                                 ui.end_row();
                             }
@@ -4957,27 +4874,27 @@ impl App {
         });
 
         ui.add_space(10.0);
-        self.render_selected_server(ui, actions);
+        self.render_selected_pod(ui, actions);
     }
 
-    fn render_create_server_form(&mut self, ui: &mut egui::Ui, actions: &mut Vec<Action>) {
+    fn render_create_pod_form(&mut self, ui: &mut egui::Ui, actions: &mut Vec<Action>) {
         ui.group(|ui| {
-            ui.heading("Create server");
+            ui.heading("Create pod");
             ui.label(
                 RichText::new(
-                    "POST /api/v1/servers. Limits are absolute values; CPU is milli-cores (1000 = one core).",
+                    "POST /api/v1/pods. Limits are absolute values; CPU is milli-cores (1000 = one core).",
                 )
                 .small()
                 .color(Color32::from_rgb(150, 156, 168)),
             );
-            let mut node_id = self.create_server.node_id.clone();
-            let mut template_id = self.create_server.template_id.clone();
-            egui::Grid::new("create_server_form")
+            let mut node_id = self.create_pod.node_id.clone();
+            let mut template_id = self.create_pod.template_id.clone();
+            egui::Grid::new("create_pod_form")
                 .num_columns(2)
                 .spacing([14.0, 6.0])
                 .show(ui, |ui| {
                     ui.label("Node");
-                    egui::ComboBox::from_id_salt("create_server_node")
+                    egui::ComboBox::from_id_salt("create_pod_node")
                         .selected_text(
                             node_id
                                 .as_ref()
@@ -5002,7 +4919,7 @@ impl App {
                     ui.end_row();
 
                     ui.label("Template");
-                    egui::ComboBox::from_id_salt("create_server_template")
+                    egui::ComboBox::from_id_salt("create_pod_template")
                         .selected_text(
                             template_id
                                 .as_ref()
@@ -5030,7 +4947,7 @@ impl App {
 
                     ui.label("Name");
                     ui.add(
-                        TextEdit::singleline(&mut self.create_server.name)
+                        TextEdit::singleline(&mut self.create_pod.name)
                             .hint_text("survival-1")
                             .desired_width(320.0),
                     );
@@ -5038,7 +4955,7 @@ impl App {
 
                     ui.label("Description");
                     ui.add(
-                        TextEdit::singleline(&mut self.create_server.description)
+                        TextEdit::singleline(&mut self.create_pod.description)
                             .hint_text("optional")
                             .desired_width(420.0),
                     );
@@ -5046,35 +4963,35 @@ impl App {
 
                     ui.label("Memory (MB, 0=unlimited)");
                     ui.add(
-                        TextEdit::singleline(&mut self.create_server.memory)
+                        TextEdit::singleline(&mut self.create_pod.memory)
                             .desired_width(120.0),
                     );
                     ui.end_row();
 
                     ui.label("Disk (MB, 0=unlimited)");
                     ui.add(
-                        TextEdit::singleline(&mut self.create_server.disk)
+                        TextEdit::singleline(&mut self.create_pod.disk)
                             .desired_width(120.0),
                     );
                     ui.end_row();
 
                     ui.label("CPU (milli-cores, 0=unlimited)");
                     ui.add(
-                        TextEdit::singleline(&mut self.create_server.cpu)
+                        TextEdit::singleline(&mut self.create_pod.cpu)
                             .desired_width(120.0),
                     );
                     ui.end_row();
 
                     ui.label("Auto allocations");
                     ui.add(
-                        TextEdit::singleline(&mut self.create_server.auto_allocations)
+                        TextEdit::singleline(&mut self.create_pod.auto_allocations)
                             .desired_width(80.0),
                     );
                     ui.end_row();
 
                     ui.label("External ref");
                     ui.add(
-                        TextEdit::singleline(&mut self.create_server.external_ref)
+                        TextEdit::singleline(&mut self.create_pod.external_ref)
                             .hint_text("optional")
                             .desired_width(360.0),
                     );
@@ -5082,7 +4999,7 @@ impl App {
 
                     ui.label("Idempotency key");
                     ui.add(
-                        TextEdit::singleline(&mut self.create_server.idempotency_key)
+                        TextEdit::singleline(&mut self.create_pod.idempotency_key)
                             .hint_text("optional 8-128 chars")
                             .desired_width(360.0),
                     );
@@ -5090,32 +5007,32 @@ impl App {
 
                     ui.label("Template version");
                     ui.add(
-                        TextEdit::singleline(&mut self.create_server.template_version)
+                        TextEdit::singleline(&mut self.create_pod.template_version)
                             .hint_text("optional, default latest")
                             .desired_width(180.0),
                     );
                     ui.end_row();
 
                     ui.label("Protocol");
-                    egui::ComboBox::from_id_salt("create_server_protocol")
-                        .selected_text(if self.create_server.protocol.is_empty() { "template default".to_string() } else { self.create_server.protocol.clone() })
+                    egui::ComboBox::from_id_salt("create_pod_protocol")
+                        .selected_text(if self.create_pod.protocol.is_empty() { "template default".to_string() } else { self.create_pod.protocol.clone() })
                         .show_ui(ui, |ui| {
-                            ui.selectable_value(&mut self.create_server.protocol, String::new(), "template default");
-                            ui.selectable_value(&mut self.create_server.protocol, "tcp".to_string(), "tcp");
-                            ui.selectable_value(&mut self.create_server.protocol, "udp".to_string(), "udp");
-                            ui.selectable_value(&mut self.create_server.protocol, "both".to_string(), "both");
+                            ui.selectable_value(&mut self.create_pod.protocol, String::new(), "template default");
+                            ui.selectable_value(&mut self.create_pod.protocol, "tcp".to_string(), "tcp");
+                            ui.selectable_value(&mut self.create_pod.protocol, "udp".to_string(), "udp");
+                            ui.selectable_value(&mut self.create_pod.protocol, "both".to_string(), "both");
                         });
                     ui.end_row();
 
                     ui.label("Labels");
                     ui.vertical(|ui| {
-                        kv_editor(ui, "create_server_labels", "", &mut self.create_server.labels);
+                        kv_editor(ui, "create_pod_labels", "", &mut self.create_pod.labels);
                     });
                     ui.end_row();
 
                     ui.label("Image label");
                     ui.add(
-                        TextEdit::singleline(&mut self.create_server.image)
+                        TextEdit::singleline(&mut self.create_pod.image)
                             .hint_text("optional, e.g. java17")
                             .desired_width(220.0),
                     );
@@ -5123,25 +5040,25 @@ impl App {
 
                     ui.label("Variables");
                     ui.add(
-                        TextEdit::multiline(&mut self.create_server.variables)
+                        TextEdit::multiline(&mut self.create_pod.variables)
                             .hint_text("KEY=VALUE, one per line")
                             .desired_rows(3)
                             .desired_width(420.0),
                     );
                     ui.end_row();
                 });
-            let template_changed = self.create_server.template_id != template_id;
-            self.create_server.node_id = node_id;
-            self.create_server.template_id = template_id;
+            let template_changed = self.create_pod.template_id != template_id;
+            self.create_pod.node_id = node_id;
+            self.create_pod.template_id = template_id;
             if template_changed {
                 if let Some(template) = self
-                    .create_server
+                    .create_pod
                     .template_id
                     .as_ref()
                     .and_then(|id| self.templates.iter().find(|template| template.id.to_string() == *id))
                     .and_then(|record| record.latest_version.as_ref())
                 {
-                    self.create_server.variables = template_variables_text(&template.template);
+                    self.create_pod.variables = template_variables_text(&template.template);
                 }
             }
             if self.nodes.is_empty() {
@@ -5158,95 +5075,95 @@ impl App {
                         .color(Color32::from_rgb(230, 180, 90)),
                 );
             }
-            if let Some(error) = &self.create_server.error {
+            if let Some(error) = &self.create_pod.error {
                 ui.colored_label(Color32::from_rgb(235, 120, 110), error);
             }
             if ui
                 .add_enabled(
                     !self.nodes.is_empty() && !self.templates.is_empty(),
-                    egui::Button::new(RichText::new("Create server").strong()),
+                    egui::Button::new(RichText::new("Create pod").strong()),
                 )
                 .clicked()
             {
-                actions.push(Action::CreateServer);
+                actions.push(Action::CreatePod);
             }
         });
     }
 
-    fn render_selected_server(&mut self, ui: &mut egui::Ui, actions: &mut Vec<Action>) {
-        let Some(selected) = self.selected_server.clone() else {
-            ui.label(RichText::new("No server selected.").color(Color32::from_rgb(150, 156, 168)));
+    fn render_selected_pod(&mut self, ui: &mut egui::Ui, actions: &mut Vec<Action>) {
+        let Some(selected) = self.selected_pod.clone() else {
+            ui.label(RichText::new("No pod selected.").color(Color32::from_rgb(150, 156, 168)));
             return;
         };
-        let Some(detail) = self.server_detail.clone() else {
+        let Some(detail) = self.pod_detail.clone() else {
             ui.horizontal(|ui| {
                 ui.spinner();
-                ui.label(format!("Loading server {} ...", short_id(&selected)));
+                ui.label(format!("Loading pod {} ...", short_id(&selected)));
             });
             return;
         };
-        let server = detail.server.clone();
-        let suspended = server.suspended || server.state == ServerState::Suspended;
+        let pod = detail.pod.clone();
+        let suspended = pod.suspended || pod.state == PodState::Suspended;
         ui.group(|ui| {
             ui.horizontal(|ui| {
-                ui.heading(&server.name);
-                ui.colored_label(state_color(server.state), state_label(server.state));
-                if server.suspended {
+                ui.heading(&pod.name);
+                ui.colored_label(state_color(pod.state), state_label(pod.state));
+                if pod.suspended {
                     ui.colored_label(Color32::from_rgb(230, 160, 80), "suspended");
                 }
             });
-            egui::Grid::new("server_detail_grid")
+            egui::Grid::new("pod_detail_grid")
                 .num_columns(4)
                 .spacing([18.0, 6.0])
                 .show(ui, |ui| {
                     ui.label("ID");
-                    ui.label(server.id.to_string());
+                    ui.label(pod.id.to_string());
                     ui.label("Node");
-                    ui.label(self.node_display_name(&server.node_id.to_string()));
+                    ui.label(self.node_display_name(&pod.node_id.to_string()));
                     ui.end_row();
 
                     ui.label("Template");
                     ui.label(format!(
                         "{} {}",
-                        self.template_display_name(&server.template_id.to_string()),
-                        server.template_version
+                        self.template_display_name(&pod.template_id.to_string()),
+                        pod.template_version
                     ));
                     ui.label("Image");
-                    truncate_label(ui, &server.image, 260.0);
+                    truncate_label(ui, &pod.image, 260.0);
                     ui.end_row();
 
                     ui.label("Container");
-                    ui.label(server.container_id.as_deref().unwrap_or("-"));
+                    ui.label(pod.container_id.as_deref().unwrap_or("-"));
                     ui.label("Generation");
-                    ui.label(server.generation.to_string());
+                    ui.label(pod.generation.to_string());
                     ui.end_row();
 
                     ui.label("Desired power");
-                    ui.label(if server.desired_running {
+                    ui.label(if pod.desired_running {
                         "running"
                     } else {
                         "stopped"
                     });
                     ui.label("Created");
-                    ui.label(server.created_at.to_string());
+                    ui.label(pod.created_at.to_string());
                     ui.end_row();
 
                     ui.label("Startup");
                     ui.add(
-                        egui::Label::new(RichText::new(&server.startup).monospace().size(12.0))
+                        egui::Label::new(RichText::new(&pod.startup).monospace().size(12.0))
                             .truncate(),
                     )
-                    .on_hover_text(&server.startup);
+                    .on_hover_text(&pod.startup);
                     ui.label("Primary allocation");
                     ui.label(
-                        server
+                        pod
                             .primary_allocation_id
                             .map(|id| short_id(&id.to_string()))
                             .unwrap_or_else(|| "-".to_string()),
                     );
                     ui.end_row();
                 });
-            if let Some(error) = &server.last_error {
+            if let Some(error) = &pod.last_error {
                 ui.colored_label(
                     Color32::from_rgb(235, 120, 110),
                     format!("Last error: {error}"),
@@ -5254,13 +5171,13 @@ impl App {
             }
 
             ui.add_space(8.0);
-            if self.edit_limits.server.as_deref() != Some(server.id.to_string().as_str()) {
-                self.edit_limits.load(&server);
+            if self.edit_limits.pod.as_deref() != Some(pod.id.to_string().as_str()) {
+                self.edit_limits.load(&pod);
             }
             ui.strong("Resource limits");
             ui.label(
                 RichText::new(
-                    "PATCH /api/v1/servers/{id} — memory, disk and CPU are absolute values; CPU is milli-cores (1000 = one core).",
+                    "PATCH /api/v1/pods/{id} — memory, disk and CPU are absolute values; CPU is milli-cores (1000 = one core).",
                 )
                 .small()
                 .color(Color32::from_rgb(150, 156, 168)),
@@ -5335,7 +5252,7 @@ impl App {
             } else {
                 for allocation in &detail.allocations {
                     let primary =
-                        server.primary_allocation_id == Some(allocation.id) || allocation.primary;
+                        pod.primary_allocation_id == Some(allocation.id) || allocation.primary;
                     ui.horizontal(|ui| {
                         ui.label(format!(
                             "{}{}:{}/{}",
@@ -5350,11 +5267,11 @@ impl App {
                     });
                 }
             }
-            let free = self.feature(&format!("server_free:{}", server.id))
+            let free = self.feature(&format!("pod_free:{}", pod.id))
                 .and_then(|value| value.get("allocations").and_then(Value::as_array).cloned())
                 .unwrap_or_default()
                 .into_iter()
-                .filter(|allocation| allocation.get("server_id").map(Value::is_null).unwrap_or(true))
+                .filter(|allocation| allocation.get("pod_id").map(Value::is_null).unwrap_or(true))
                 .collect::<Vec<_>>();
             if !free.is_empty() {
                 ui.horizontal(|ui| {
@@ -5392,7 +5309,7 @@ impl App {
                         .clicked()
                     {
                         actions.push(Action::Power {
-                            server: server.id.to_string(),
+                            pod: pod.id.to_string(),
                             signal,
                         });
                     }
@@ -5403,10 +5320,10 @@ impl App {
                     .on_hover_text("Recreate the container and rerun the install script")
                     .clicked()
                 {
-                    actions.push(Action::Reinstall(server.id.to_string()));
+                    actions.push(Action::Reinstall(pod.id.to_string()));
                 }
                 if ui
-                    .button(if server.suspended {
+                    .button(if pod.suspended {
                         "Resume"
                     } else {
                         "Suspend"
@@ -5414,14 +5331,14 @@ impl App {
                     .clicked()
                 {
                     actions.push(Action::Suspend {
-                        server: server.id.to_string(),
-                        resume: server.suspended,
+                        pod: pod.id.to_string(),
+                        resume: pod.suspended,
                     });
                 }
                 if ui.button("Delete").clicked() {
-                    actions.push(Action::AskDeleteServer {
-                        id: server.id.to_string(),
-                        name: server.name.clone(),
+                    actions.push(Action::AskDeletePod {
+                        id: pod.id.to_string(),
+                        name: pod.name.clone(),
                     });
                 }
                 ui.separator();
@@ -5487,29 +5404,29 @@ impl App {
         ui.add_space(6.0);
         ui.horizontal(|ui| {
             ui.heading("Console");
-            let mut selected = self.selected_server.clone();
-            egui::ComboBox::from_id_salt("console_server")
-                .selected_text(self.server_combo_text(selected.as_deref()))
+            let mut selected = self.selected_pod.clone();
+            egui::ComboBox::from_id_salt("console_pod")
+                .selected_text(self.pod_combo_text(selected.as_deref()))
                 .show_ui(ui, |ui| {
-                    for server in &self.servers {
-                        let id = server.id.to_string();
+                    for pod in &self.pods {
+                        let id = pod.id.to_string();
                         ui.selectable_value(
                             &mut selected,
                             Some(id.clone()),
-                            format!("{} ({})", server.name, short_id(&id)),
+                            format!("{} ({})", pod.name, short_id(&id)),
                         );
                     }
                 });
-            if selected != self.selected_server {
+            if selected != self.selected_pod {
                 if let Some(id) = selected {
-                    actions.push(Action::SelectServer(id));
+                    actions.push(Action::SelectPod(id));
                 }
             }
             if ui.button("Clear").clicked() {
                 actions.push(Action::ConsoleClear);
             }
-            if ui.button("Refresh servers").clicked() {
-                actions.push(Action::RefreshServers);
+            if ui.button("Refresh pods").clicked() {
+                actions.push(Action::RefreshPods);
             }
             ui.checkbox(&mut self.console_stream, "Live SSE stream");
             ui.label(
@@ -5523,16 +5440,16 @@ impl App {
             );
         });
 
-        let Some(server_id) = self.selected_server.clone() else {
+        let Some(pod_id) = self.selected_pod.clone() else {
             ui.add_space(20.0);
             ui.label(
-                RichText::new("Select a server to open its console.")
+                RichText::new("Select a pod to open its console.")
                     .color(Color32::from_rgb(150, 156, 168)),
             );
             return;
         };
-        let state = self.server_state(&server_id);
-        let running = state == Some(ServerState::Running);
+        let state = self.pod_state(&pod_id);
+        let running = state == Some(PodState::Running);
         if running {
             ui.horizontal(|ui| {
                 ui.colored_label(Color32::from_rgb(95, 200, 120), "running");
@@ -5551,7 +5468,7 @@ impl App {
                 ui.colored_label(Color32::from_rgb(230, 180, 90), "paused");
                 ui.label(
                     RichText::new(format!(
-                        "Server is {}; polling is paused until it is running.",
+                        "Pod is {}; polling is paused until it is running.",
                         state.map_or("not loaded", state_label)
                     ))
                     .small()
@@ -5561,7 +5478,7 @@ impl App {
         }
 
         let (line_count, last_error, last_update, truncated) = {
-            let log = self.console_logs.entry(server_id.clone()).or_default();
+            let log = self.console_logs.entry(pod_id.clone()).or_default();
             (
                 log.lines.len(),
                 log.last_error.clone(),
@@ -5589,21 +5506,21 @@ impl App {
             .fill(Color32::from_rgb(8, 10, 13))
             .inner_margin(egui::Margin::same(6))
             .show(ui, |ui| {
-                let log = self.console_logs.entry(server_id.clone()).or_default();
+                let log = self.console_logs.entry(pod_id.clone()).or_default();
                 if log.lines.is_empty() {
                     ui.add_space(4.0);
                     ui.label(
                         RichText::new(if running {
                             "Waiting for output..."
                         } else {
-                            "No buffered output. Start the server to poll logs."
+                            "No buffered output. Start the pod to poll logs."
                         })
                         .monospace()
                         .color(Color32::from_rgb(120, 128, 140)),
                     );
                 }
                 let output = ScrollArea::vertical()
-                    .id_salt(("console_output", &server_id))
+                    .id_salt(("console_output", &pod_id))
                     .stick_to_bottom(true)
                     .max_height(console_height)
                     .auto_shrink([false, false])
@@ -5678,7 +5595,7 @@ impl App {
             }
         });
         ui.label(
-            RichText::new("Enter sends. Commands are POSTed to /api/v1/servers/{id}/command.")
+            RichText::new("Enter sends. Commands are POSTed to /api/v1/pods/{id}/command.")
                 .small()
                 .color(Color32::from_rgb(130, 136, 148)),
         );
@@ -5688,22 +5605,22 @@ impl App {
         ui.add_space(6.0);
         ui.horizontal(|ui| {
             ui.heading("Files");
-            let mut selected = self.selected_server.clone();
-            egui::ComboBox::from_id_salt("files_server")
-                .selected_text(self.server_combo_text(selected.as_deref()))
+            let mut selected = self.selected_pod.clone();
+            egui::ComboBox::from_id_salt("files_pod")
+                .selected_text(self.pod_combo_text(selected.as_deref()))
                 .show_ui(ui, |ui| {
-                    for server in &self.servers {
-                        let id = server.id.to_string();
+                    for pod in &self.pods {
+                        let id = pod.id.to_string();
                         ui.selectable_value(
                             &mut selected,
                             Some(id.clone()),
-                            format!("{} ({})", server.name, short_id(&id)),
+                            format!("{} ({})", pod.name, short_id(&id)),
                         );
                     }
                 });
-            if selected != self.selected_server {
+            if selected != self.selected_pod {
                 if let Some(id) = selected {
-                    actions.push(Action::SelectServer(id));
+                    actions.push(Action::SelectPod(id));
                 }
             }
             if ui.button("Refresh").clicked() {
@@ -5711,10 +5628,10 @@ impl App {
             }
         });
 
-        if self.selected_server.is_none() {
+        if self.selected_pod.is_none() {
             ui.add_space(20.0);
             ui.label(
-                RichText::new("Select a server to browse its filesystem.")
+                RichText::new("Select a pod to browse its filesystem.")
                     .color(Color32::from_rgb(150, 156, 168)),
             );
             return;
@@ -5923,7 +5840,7 @@ impl App {
                             editor.encoding,
                             editor.size,
                             if editor.truncated {
-                                " · truncated by server"
+                                " · truncated by pod"
                             } else {
                                 ""
                             }
@@ -5977,19 +5894,19 @@ impl App {
 
     fn page_config(&mut self, ui: &mut egui::Ui, actions: &mut Vec<Action>) {
         ui.add_space(6.0);
-        ui.heading("Server configuration");
-        let Some(server_id) = self.selected_server.clone() else {
-            ui.label("Select a server in Servers or Console first.");
+        ui.heading("Pod configuration");
+        let Some(pod_id) = self.selected_pod.clone() else {
+            ui.label("Select a pod in Pods or Console first.");
             return;
         };
-        if self.server_config.server.as_deref() != Some(server_id.as_str()) {
-            if let Some(detail) = &self.server_detail {
-                let server = detail.server.clone();
-                self.server_config.load(&server);
+        if self.pod_config.pod.as_deref() != Some(pod_id.as_str()) {
+            if let Some(detail) = &self.pod_detail {
+                let pod = detail.pod.clone();
+                self.pod_config.load(&pod);
             }
         }
-        if self.server_config.server.is_none() {
-            ui.label("Loading server configuration…");
+        if self.pod_config.pod.is_none() {
+            ui.label("Loading pod configuration…");
             if ui.button("Refresh").clicked() {
                 actions.push(Action::RefreshDetail);
             }
@@ -6000,29 +5917,27 @@ impl App {
                 .small()
                 .color(Color32::from_rgb(150, 156, 168)),
         );
-        egui::Grid::new("server_config_grid")
+        egui::Grid::new("pod_config_grid")
             .num_columns(2)
             .spacing([14.0, 7.0])
             .show(ui, |ui| {
                 ui.label("Name");
-                ui.add(TextEdit::singleline(&mut self.server_config.name).desired_width(360.0));
+                ui.add(TextEdit::singleline(&mut self.pod_config.name).desired_width(360.0));
                 ui.end_row();
                 ui.label("Description");
-                ui.add(
-                    TextEdit::singleline(&mut self.server_config.description).desired_width(500.0),
-                );
+                ui.add(TextEdit::singleline(&mut self.pod_config.description).desired_width(500.0));
                 ui.end_row();
                 ui.label("External ref");
                 ui.add(
-                    TextEdit::singleline(&mut self.server_config.external_ref).desired_width(360.0),
+                    TextEdit::singleline(&mut self.pod_config.external_ref).desired_width(360.0),
                 );
                 ui.end_row();
                 ui.label("Image");
-                ui.add(TextEdit::singleline(&mut self.server_config.image).desired_width(500.0));
+                ui.add(TextEdit::singleline(&mut self.pod_config.image).desired_width(500.0));
                 ui.end_row();
                 ui.label("Template version");
                 ui.add(
-                    TextEdit::singleline(&mut self.server_config.template_version)
+                    TextEdit::singleline(&mut self.pod_config.template_version)
                         .desired_width(180.0),
                 );
                 ui.end_row();
@@ -6030,22 +5945,22 @@ impl App {
         ui.add_space(6.0);
         kv_editor(
             ui,
-            "server_config_labels",
+            "pod_config_labels",
             "Labels",
-            &mut self.server_config.labels,
+            &mut self.pod_config.labels,
         );
         kv_editor(
             ui,
-            "server_config_variables",
+            "pod_config_variables",
             "Template variables (leave empty to keep current values)",
-            &mut self.server_config.variables,
+            &mut self.pod_config.variables,
         );
-        if let Some(error) = &self.server_config.error {
+        if let Some(error) = &self.pod_config.error {
             ui.colored_label(Color32::from_rgb(235, 120, 110), error);
         }
         ui.horizontal(|ui| {
             if ui.button("Save configuration").clicked() {
-                actions.push(Action::SaveServerConfig);
+                actions.push(Action::SavePodConfig);
             }
             if ui.button("Reload").clicked() {
                 actions.push(Action::RefreshDetail);
@@ -6056,11 +5971,11 @@ impl App {
     fn page_schedules(&mut self, ui: &mut egui::Ui, actions: &mut Vec<Action>) {
         ui.add_space(6.0);
         ui.heading("Schedules");
-        let Some(server) = self.selected_server.clone() else {
-            ui.label("Select a server first.");
+        let Some(pod) = self.selected_pod.clone() else {
+            ui.label("Select a pod first.");
             return;
         };
-        let key = format!("schedules:{server}");
+        let key = format!("schedules:{pod}");
         let value = self.feature(&key);
         if let Some(error) = self.feature_error(&key) {
             ui.colored_label(Color32::from_rgb(235, 120, 110), error);
@@ -6193,11 +6108,11 @@ impl App {
     fn page_sftp(&mut self, ui: &mut egui::Ui, actions: &mut Vec<Action>) {
         ui.add_space(6.0);
         ui.heading("SFTP credentials");
-        let Some(server) = self.selected_server.clone() else {
-            ui.label("Select a server first.");
+        let Some(pod) = self.selected_pod.clone() else {
+            ui.label("Select a pod first.");
             return;
         };
-        let key = format!("sftp:{server}");
+        let key = format!("sftp:{pod}");
         let value = self.feature(&key);
         if let Some(error) = self.feature_error(&key) {
             ui.colored_label(Color32::from_rgb(235, 120, 110), error);
@@ -6288,15 +6203,15 @@ impl App {
     fn page_environment(&mut self, ui: &mut egui::Ui, actions: &mut Vec<Action>) {
         ui.add_space(6.0);
         ui.heading("Rendered environment");
-        let Some(server) = self.selected_server.clone() else {
-            ui.label("Select a server first.");
+        let Some(pod) = self.selected_pod.clone() else {
+            ui.label("Select a pod first.");
             return;
         };
-        let key = format!("environment:{server}");
+        let key = format!("environment:{pod}");
         if let Some(error) = self.feature_error(&key) {
             ui.colored_label(Color32::from_rgb(235, 120, 110), error);
         }
-        ui.label("Requires server:secrets or admin. Change template variables in Config.");
+        ui.label("Requires pod:secrets or admin. Change template variables in Config.");
         if ui.button("Refresh").clicked() {
             actions.push(Action::RefreshTab);
         }
@@ -6323,11 +6238,11 @@ impl App {
     fn page_jobs(&mut self, ui: &mut egui::Ui, actions: &mut Vec<Action>) {
         ui.add_space(6.0);
         ui.heading("Jobs");
-        let Some(server) = self.selected_server.clone() else {
-            ui.label("Select a server first.");
+        let Some(pod) = self.selected_pod.clone() else {
+            ui.label("Select a pod first.");
             return;
         };
-        let key = format!("jobs:{server}");
+        let key = format!("jobs:{pod}");
         if let Some(error) = self.feature_error(&key) {
             ui.colored_label(Color32::from_rgb(235, 120, 110), error);
         }
@@ -6509,10 +6424,8 @@ impl App {
                 ui.label("Scopes (comma separated)");
                 ui.add(TextEdit::singleline(&mut self.api_key_form.scopes).desired_width(600.0));
                 ui.end_row();
-                ui.label("Server allow-list (comma separated UUIDs)");
-                ui.add(
-                    TextEdit::singleline(&mut self.api_key_form.server_ids).desired_width(600.0),
-                );
+                ui.label("Pod allow-list (comma separated UUIDs)");
+                ui.add(TextEdit::singleline(&mut self.api_key_form.pod_ids).desired_width(600.0));
                 ui.end_row();
                 ui.label("Expires in days");
                 ui.add(TextEdit::singleline(&mut self.api_key_form.days).desired_width(100.0));
@@ -6750,7 +6663,7 @@ impl App {
                             .show(ui, |ui| {
                                 ui.strong("Node");
                                 ui.strong("Address");
-                                ui.strong("Server");
+                                ui.strong("Pod");
                                 ui.strong("Label");
                                 ui.strong("");
                                 ui.end_row();
@@ -6780,7 +6693,7 @@ impl App {
                                     ));
                                     ui.label(
                                         allocation
-                                            .get("server_id")
+                                            .get("pod_id")
                                             .and_then(Value::as_str)
                                             .map(short_id)
                                             .unwrap_or_else(|| "free".to_string()),
@@ -6791,10 +6704,7 @@ impl App {
                                             .and_then(Value::as_str)
                                             .unwrap_or("-"),
                                     );
-                                    if allocation
-                                        .get("server_id")
-                                        .map(Value::is_null)
-                                        .unwrap_or(true)
+                                    if allocation.get("pod_id").map(Value::is_null).unwrap_or(true)
                                         && ui.small_button("Delete").clicked()
                                     {
                                         actions.push(Action::AskDeleteAllocation {
@@ -7132,7 +7042,7 @@ impl App {
                             .show(ui, |ui| {
                                 ui.strong("Address");
                                 ui.strong("Protocol");
-                                ui.strong("Server");
+                                ui.strong("Pod");
                                 ui.strong("Label");
                                 ui.strong("");
                                 ui.end_row();
@@ -7141,7 +7051,7 @@ impl App {
                                     ui.label(allocation.protocol.as_str());
                                     ui.label(
                                         allocation
-                                            .server_id
+                                            .pod_id
                                             .map(|id| short_id(&id.to_string()))
                                             .unwrap_or_else(|| "free".to_string()),
                                     );
@@ -7748,26 +7658,23 @@ impl App {
 
         ui.add_space(8.0);
         ui.group(|ui| {
-            ui.strong("Server databases");
-            let Some(server) = self.selected_server.clone() else {
+            ui.strong("Pod databases");
+            let Some(pod) = self.selected_pod.clone() else {
                 ui.label(
-                    RichText::new("Select a server in Servers or Console first.")
+                    RichText::new("Select a pod in Pods or Console first.")
                         .color(Color32::from_rgb(150, 156, 168)),
                 );
                 return;
             };
             ui.label(
-                RichText::new(format!(
-                    "GET /api/v1/servers/{}/databases",
-                    short_id(&server)
-                ))
-                .small()
-                .color(Color32::from_rgb(150, 156, 168)),
+                RichText::new(format!("GET /api/v1/pods/{}/databases", short_id(&pod)))
+                    .small()
+                    .color(Color32::from_rgb(150, 156, 168)),
             );
-            if self.server_dbs.is_empty() {
-                ui.label("No databases for this server.");
+            if self.pod_dbs.is_empty() {
+                ui.label("No databases for this pod.");
             } else {
-                for database in &self.server_dbs {
+                for database in &self.pod_dbs {
                     ui.horizontal(|ui| {
                         ui.label(
                             RichText::new(format!(
@@ -7786,7 +7693,7 @@ impl App {
                 }
             }
             ui.horizontal(|ui| {
-                let mut host_id = self.create_server_db.host_id.clone();
+                let mut host_id = self.create_pod_db.host_id.clone();
                 egui::ComboBox::from_id_salt("create_db_host_select")
                     .selected_text(
                         host_id
@@ -7810,18 +7717,18 @@ impl App {
                             );
                         }
                     });
-                self.create_server_db.host_id = host_id;
+                self.create_pod_db.host_id = host_id;
                 ui.label("Remote");
                 ui.add(
-                    TextEdit::singleline(&mut self.create_server_db.remote)
+                    TextEdit::singleline(&mut self.create_pod_db.remote)
                         .hint_text("%")
                         .desired_width(100.0),
                 );
                 if ui.button("Create database").clicked() {
-                    actions.push(Action::CreateServerDb);
+                    actions.push(Action::CreatePodDb);
                 }
             });
-            if let Some(error) = &self.create_server_db.error {
+            if let Some(error) = &self.create_pod_db.error {
                 ui.colored_label(Color32::from_rgb(235, 120, 110), error);
             }
             if let Some(db) = &self.created_db {
@@ -7886,19 +7793,19 @@ impl App {
                 actions.push(Action::RefreshTab);
             }
         });
-        let Some(server) = self.selected_server.clone() else {
+        let Some(pod) = self.selected_pod.clone() else {
             ui.add_space(20.0);
             ui.label(
-                RichText::new("Select a server to list its backups.")
+                RichText::new("Select a pod to list its backups.")
                     .color(Color32::from_rgb(150, 156, 168)),
             );
             return;
         };
         ui.label(
             RichText::new(format!(
-                "Server {} ({})",
-                self.server_combo_text(Some(&server)),
-                short_id(&server)
+                "Pod {} ({})",
+                self.pod_combo_text(Some(&pod)),
+                short_id(&pod)
             ))
             .small()
             .color(Color32::from_rgb(150, 156, 168)),
@@ -7933,8 +7840,7 @@ impl App {
         ui.add_space(8.0);
         if self.backups.is_empty() {
             ui.label(
-                RichText::new("No backups for this server.")
-                    .color(Color32::from_rgb(150, 156, 168)),
+                RichText::new("No backups for this pod.").color(Color32::from_rgb(150, 156, 168)),
             );
         } else {
             let backups = self.backups.clone();
@@ -8331,14 +8237,14 @@ impl App {
         });
     }
 
-    fn server_combo_text(&self, id: Option<&str>) -> String {
+    fn pod_combo_text(&self, id: Option<&str>) -> String {
         id.and_then(|id| {
-            self.servers
+            self.pods
                 .iter()
-                .find(|server| server.id.to_string() == id)
-                .map(|server| format!("{} ({})", server.name, short_id(id)))
+                .find(|pod| pod.id.to_string() == id)
+                .map(|pod| format!("{} ({})", pod.name, short_id(id)))
         })
-        .unwrap_or_else(|| "Select server".to_string())
+        .unwrap_or_else(|| "Select pod".to_string())
     }
 
     fn node_display_name(&self, id: &str) -> String {
@@ -8439,27 +8345,27 @@ fn value_text(value: &Value) -> String {
     }
 }
 
-fn state_label(state: ServerState) -> &'static str {
+fn state_label(state: PodState) -> &'static str {
     match state {
-        ServerState::Installing => "installing",
-        ServerState::Offline => "offline",
-        ServerState::Starting => "starting",
-        ServerState::Running => "running",
-        ServerState::Stopping => "stopping",
-        ServerState::Suspended => "suspended",
-        ServerState::Pending => "pending",
-        ServerState::Unknown => "unknown",
+        PodState::Installing => "installing",
+        PodState::Offline => "offline",
+        PodState::Starting => "starting",
+        PodState::Running => "running",
+        PodState::Stopping => "stopping",
+        PodState::Suspended => "suspended",
+        PodState::Pending => "pending",
+        PodState::Unknown => "unknown",
     }
 }
 
-fn state_color(state: ServerState) -> Color32 {
+fn state_color(state: PodState) -> Color32 {
     match state {
-        ServerState::Running => Color32::from_rgb(95, 200, 120),
-        ServerState::Starting | ServerState::Installing => Color32::from_rgb(230, 180, 90),
-        ServerState::Stopping => Color32::from_rgb(230, 150, 80),
-        ServerState::Suspended => Color32::from_rgb(220, 120, 160),
-        ServerState::Pending => Color32::from_rgb(110, 170, 240),
-        ServerState::Offline | ServerState::Unknown => Color32::from_rgb(150, 156, 168),
+        PodState::Running => Color32::from_rgb(95, 200, 120),
+        PodState::Starting | PodState::Installing => Color32::from_rgb(230, 180, 90),
+        PodState::Stopping => Color32::from_rgb(230, 150, 80),
+        PodState::Suspended => Color32::from_rgb(220, 120, 160),
+        PodState::Pending => Color32::from_rgb(110, 170, 240),
+        PodState::Offline | PodState::Unknown => Color32::from_rgb(150, 156, 168),
     }
 }
 

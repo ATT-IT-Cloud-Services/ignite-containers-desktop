@@ -2,11 +2,11 @@
 
 Native egui desktop client for Ignite Containers control planes.
 
-- Manage servers, nodes, templates, allocations, backups, schedules, SFTP,
+- Manage pods, nodes, templates, allocations, backups, schedules, SFTP,
   databases, notifications, API keys, Caddy routes and metrics.
-- Live console over authenticated SSE (`/servers/{id}/logs/stream`) with a
+- Live console over authenticated SSE (`/pods/{id}/logs/stream`) with a
   cursor-polling fallback.
-- Signed-in operator workflow with server filters, confirmations, key/value
+- Signed-in operator workflow with pod filters, confirmations, key/value
   editors and a raw API escape hatch.
 
 ## Releases
