@@ -17,8 +17,8 @@ jobs:
           repository: ATT-IT-Cloud-Services/ignite-containers-monorepo
           token: ${{ secrets.MONOREPO_TOKEN }}
           path: monorepo
-      - uses: dtolnay/rust-toolchain@stable
-      - uses: Swatinem/rust-cache@v2
+      - uses: dtolnay/rust-toolchain@39008827e6b4319a349e9a42dfc90579dd25f1ca # stable
+      - uses: Swatinem/rust-cache@e9d7b9f1e587218970671bac74e5511ed9506e6a # v2
         with:
           workspaces: monorepo
       - name: Desktop system dependencies
