@@ -15,7 +15,7 @@ Installers are published from the private source monorepo into this public
 repository:
 
 - Linux: `.AppImage`, `.deb`, `.rpm`
-- Windows: `.exe` (NSIS) and `.msi` (WiX)
+- Windows: `.exe` (NSIS installer, cross-compiled on Linux)
 
 ## Building
 
