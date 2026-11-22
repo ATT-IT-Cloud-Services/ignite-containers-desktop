@@ -8,7 +8,7 @@ permissions:
   contents: read
 jobs:
   build:
-    runs-on: leaseweb
+    runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       - name: Checkout private source monorepo
